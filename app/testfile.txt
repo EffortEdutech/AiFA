@@ -1,0 +1,1 @@
+This file is a leftover artifact from environment testing during scaffolding and can be safely deleted manually.

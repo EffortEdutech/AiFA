@@ -1,0 +1,547 @@
+/**
+ * BusinessEvent / BusinessData repository — Vol 4_0 (Business Data
+ * Architecture), Vol 11_1 §2-3 (schema).
+ *
+ * Immutability by design: this module deliberately exposes no update or
+ * delete function for a confirmed BusinessEvent. That is the primary
+ * enforcement mechanism (an API surface that cannot express the operation);
+ * the DB trigger in migrations.ts is defense-in-depth on top of it
+ * (Vol 4_0 §7).
+ *
+ * Sprint 2 scope: manual/text capture only, immediately 'confirmed'.
+ * Sprint 3 adds a second, AI-interpreted path (recordCaptureQueued +
+ * setBusinessEventStatus/setBusinessDataClassification, used by
+ * ai/capturePipeline.ts) that goes through
+ * queued -> processing -> draft|needs_clarification -> confirmed before
+ * the row becomes immutable — Sprint 3 scoped this to the Expense domain
+ * only; Sprint 6 extends it to Sale and Purchase too. Banking stays on the
+ * Sprint 2 manual/immediate-confirm path until its own pipeline arrives in
+ * Sprint 7 (Vol 0_1 §4).
+ */
+import type { SqlDb } from "./types";
+
+export type CaptureMode = "voice" | "text" | "photo" | "document" | "manual";
+export type BusinessEventStatus =
+  | "queued"
+  | "processing"
+  | "needs_clarification"
+  | "draft"
+  | "confirmed"
+  | "superseded";
+export type DomainHint =
+  "sale" | "purchase" | "expense" | "banking" | "unclassified";
+export type BusinessDataType =
+  "sale" | "purchase" | "expense" | "bank_transaction";
+export type PaymentMethod =
+  "cash" | "bank_transfer" | "card" | "other" | "unspecified";
+
+export interface BusinessEvent {
+  id: string;
+  business_id: string;
+  captured_at: string;
+  capture_mode: CaptureMode;
+  raw_input_ref: string | null;
+  status: BusinessEventStatus;
+  superseded_by: string | null;
+  domain_hint: DomainHint;
+}
+
+export interface BusinessData {
+  id: string;
+  business_event_id: string;
+  type: BusinessDataType;
+  counterparty_name: string | null;
+  amount: number;
+  currency: string;
+  payment_method: PaymentMethod;
+  category_guess: string | null;
+  confidence: number | null;
+  document_refs: string; // JSON-encoded array; SQLite has no native array type.
+  created_at: string;
+}
+
+export interface ManualCaptureInput {
+  businessId: string;
+  domainHint: DomainHint;
+  dataType: BusinessDataType;
+  description: string;
+  counterpartyName?: string;
+  amount: number;
+  currency: string;
+  paymentMethod: PaymentMethod;
+}
+
+/**
+ * Generates a Business Event id in the Vol 11_1 §2 format: BE-YYYYMMDD-NNNN.
+ * NNNN is a per-day sequence, derived from how many events already exist
+ * for that date — sufficient for Phase 1's single-device, single-business
+ * capture volume.
+ */
+export async function generateBusinessEventId(
+  db: SqlDb,
+  date: Date,
+): Promise<string> {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const datePart = `${yyyy}${mm}${dd}`;
+
+  const rows = await db.queryAll<{ count: number }>(
+    `SELECT COUNT(*) as count FROM business_events WHERE id LIKE ?;`,
+    [`BE-${datePart}-%`],
+  );
+  const nextSeq = (rows[0]?.count ?? 0) + 1;
+  const seqPart = String(nextSeq).padStart(4, "0");
+  return `BE-${datePart}-${seqPart}`;
+}
+
+async function insertEventAndData(
+  db: SqlDb,
+  params: {
+    businessId: string;
+    domainHint: DomainHint;
+    dataType: BusinessDataType;
+    description: string;
+    counterpartyName?: string;
+    amount: number;
+    currency: string;
+    paymentMethod: PaymentMethod;
+    status: BusinessEventStatus;
+  },
+): Promise<{ event: BusinessEvent; data: BusinessData }> {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const eventId = await generateBusinessEventId(db, now);
+  const dataId = `BD-${eventId.slice(3)}`;
+
+  await db.execute(
+    `INSERT INTO business_events
+       (id, business_id, captured_at, capture_mode, raw_input_ref, status, superseded_by, domain_hint)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      eventId,
+      params.businessId,
+      nowIso,
+      "text",
+      params.description,
+      params.status,
+      null,
+      params.domainHint,
+    ],
+  );
+
+  await db.execute(
+    `INSERT INTO business_data
+       (id, business_event_id, type, counterparty_name, amount, currency, payment_method, category_guess, confidence, document_refs, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      dataId,
+      eventId,
+      params.dataType,
+      params.counterpartyName ?? null,
+      params.amount,
+      params.currency,
+      params.paymentMethod,
+      null,
+      null,
+      "[]",
+      nowIso,
+    ],
+  );
+
+  return {
+    event: {
+      id: eventId,
+      business_id: params.businessId,
+      captured_at: nowIso,
+      capture_mode: "text",
+      raw_input_ref: params.description,
+      status: params.status,
+      superseded_by: null,
+      domain_hint: params.domainHint,
+    },
+    data: {
+      id: dataId,
+      business_event_id: eventId,
+      type: params.dataType,
+      counterparty_name: params.counterpartyName ?? null,
+      amount: params.amount,
+      currency: params.currency,
+      payment_method: params.paymentMethod,
+      category_guess: null,
+      confidence: null,
+      document_refs: "[]",
+      created_at: nowIso,
+    },
+  };
+}
+
+/**
+ * Records a manually-captured Business Event and its BusinessData in one
+ * step, immediately 'confirmed'. Used for domains that have no AI pipeline
+ * yet — Banking only, as of Sprint 6 (Sprint 7 adds Banking's pipeline).
+ * Expense/Sale/Purchase capture uses recordCaptureQueued instead.
+ */
+export async function recordManualCapture(
+  db: SqlDb,
+  input: ManualCaptureInput,
+): Promise<{ event: BusinessEvent; data: BusinessData }> {
+  return insertEventAndData(db, { ...input, status: "confirmed" });
+}
+
+export interface CaptureQueuedInput {
+  /** Sprint 6: which AI-interpreted domain this capture belongs to — domain_hint and BusinessData.type both take this value directly (their enums share the "expense" | "sale" | "purchase" values by design). */
+  domain: "expense" | "sale" | "purchase";
+  businessId: string;
+  description: string;
+  counterpartyName?: string;
+  amount: number;
+  currency: string;
+  paymentMethod: PaymentMethod;
+}
+
+export interface QueuedPhotoEventInput {
+  businessId: string;
+  /** Only known after extraction/owner entry, so photo events start with no amount/data at all -- see attachExpenseBusinessData. */
+}
+
+/**
+ * Creates a queued, EVENT-ONLY BusinessEvent for a photo capture (Vol 7_1
+ * §2 photo mode) — no BusinessData yet, since amount/category aren't known
+ * until vision extraction or the owner's fallback form completes (Vol 7_1
+ * §5.1). This is the one legitimate case where an event exists without a
+ * data row; every other capture path creates both together
+ * (insertEventAndData above).
+ */
+export async function createQueuedPhotoEvent(
+  db: SqlDb,
+  input: QueuedPhotoEventInput,
+): Promise<BusinessEvent> {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const eventId = await generateBusinessEventId(db, now);
+
+  await db.execute(
+    `INSERT INTO business_events
+       (id, business_id, captured_at, capture_mode, raw_input_ref, status, superseded_by, domain_hint)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      eventId,
+      input.businessId,
+      nowIso,
+      "photo",
+      null,
+      "queued",
+      null,
+      "expense",
+    ],
+  );
+
+  return {
+    id: eventId,
+    business_id: input.businessId,
+    captured_at: nowIso,
+    capture_mode: "photo",
+    raw_input_ref: null,
+    status: "queued",
+    superseded_by: null,
+    domain_hint: "expense",
+  };
+}
+
+export interface AttachExpenseDataInput {
+  eventId: string;
+  description: string;
+  counterpartyName?: string;
+  amount: number;
+  currency: string;
+  paymentMethod: PaymentMethod;
+}
+
+/**
+ * Attaches a BusinessData row to an existing (event-only) photo event once
+ * its fields are known — either from a 'complete' vision extraction or the
+ * owner completing the Vol 7_1 §5.1 fallback form. Also backfills the
+ * event's raw_input_ref with the description, since photo events are
+ * created without one (there's no text yet at capture time). This is a
+ * pre-confirmation write (event status is still 'queued'/'processing' at
+ * this point), so it is not blocked by the confirmed-immutability trigger.
+ */
+export async function attachExpenseBusinessData(
+  db: SqlDb,
+  input: AttachExpenseDataInput,
+): Promise<BusinessData> {
+  const nowIso = new Date().toISOString();
+  const dataId = `BD-${input.eventId.slice(3)}`;
+
+  await db.execute(
+    `UPDATE business_events SET raw_input_ref = ? WHERE id = ?;`,
+    [input.description, input.eventId],
+  );
+
+  await db.execute(
+    `INSERT INTO business_data
+       (id, business_event_id, type, counterparty_name, amount, currency, payment_method, category_guess, confidence, document_refs, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      dataId,
+      input.eventId,
+      "expense",
+      input.counterpartyName ?? null,
+      input.amount,
+      input.currency,
+      input.paymentMethod,
+      null,
+      null,
+      "[]",
+      nowIso,
+    ],
+  );
+
+  return {
+    id: dataId,
+    business_event_id: input.eventId,
+    type: "expense",
+    counterparty_name: input.counterpartyName ?? null,
+    amount: input.amount,
+    currency: input.currency,
+    payment_method: input.paymentMethod,
+    category_guess: null,
+    confidence: null,
+    document_refs: "[]",
+    created_at: nowIso,
+  };
+}
+
+/**
+ * Records a captured Business Event as 'queued' — not yet confirmed — for
+ * any of the three AI-interpreted domains (Sprint 3: expense only; Sprint
+ * 6: generalised to sale and purchase too, replacing the former
+ * recordExpenseCaptureQueued). ai/capturePipeline.ts drives it through
+ * processing -> draft | needs_clarification -> confirmed. Kept in this
+ * module (not the pipeline module) because it is a plain data-layer
+ * operation, consistent with recordManualCapture above. domain_hint and
+ * BusinessData.type both take input.domain directly — the DomainHint and
+ * BusinessDataType enums share the same "expense" | "sale" | "purchase"
+ * literal values by design, so no per-domain mapping table is needed.
+ */
+export async function recordCaptureQueued(
+  db: SqlDb,
+  input: CaptureQueuedInput,
+): Promise<{ event: BusinessEvent; data: BusinessData }> {
+  return insertEventAndData(db, {
+    businessId: input.businessId,
+    domainHint: input.domain,
+    dataType: input.domain,
+    description: input.description,
+    counterpartyName: input.counterpartyName,
+    amount: input.amount,
+    currency: input.currency,
+    paymentMethod: input.paymentMethod,
+    status: "queued",
+  });
+}
+
+/**
+ * Transitions a BusinessEvent's status. Only valid pre-confirmation (the
+ * immutability trigger in migrations.ts blocks any UPDATE once
+ * OLD.status = 'confirmed', including this one) — that restriction is the
+ * enforcement mechanism, not something checked again here.
+ */
+export async function setBusinessEventStatus(
+  db: SqlDb,
+  eventId: string,
+  status: BusinessEventStatus,
+): Promise<void> {
+  await db.execute(`UPDATE business_events SET status = ? WHERE id = ?;`, [
+    status,
+    eventId,
+  ]);
+}
+
+/**
+ * Persists a classification (category + confidence) onto a BusinessData
+ * row. Callers must ensure this runs BEFORE the parent BusinessEvent is
+ * set to 'confirmed' — nothing here enforces that ordering, since
+ * business_data itself has no immutability trigger; the ordering
+ * discipline in ai/expensePipeline.ts is what makes it effectively
+ * immutable too. See that module's finalizeExpenseCategory for the
+ * invariant this depends on.
+ */
+export async function setBusinessDataClassification(
+  db: SqlDb,
+  businessDataId: string,
+  categoryGuess: string,
+  confidence: number,
+): Promise<void> {
+  await db.execute(
+    `UPDATE business_data SET category_guess = ?, confidence = ? WHERE id = ?;`,
+    [categoryGuess, confidence, businessDataId],
+  );
+}
+
+/**
+ * Links an already-confirmed BusinessEvent forward to the correcting event
+ * that supersedes it (Vol 4_0 §7). Allowed exactly once by the migration 4
+ * trigger — calling this a second time on the same event, or on a
+ * non-confirmed event, is rejected at the DB layer, not just here.
+ */
+export async function setSupersededBy(
+  db: SqlDb,
+  originalEventId: string,
+  correctingEventId: string,
+): Promise<void> {
+  await db.execute(
+    `UPDATE business_events SET superseded_by = ? WHERE id = ?;`,
+    [correctingEventId, originalEventId],
+  );
+}
+
+export interface RecentActivityItem {
+  event: BusinessEvent;
+  data: BusinessData;
+  /**
+   * Denormalised from the latest ai_interpretations row for this event, if
+   * any (Sprint 3). Lets the UI show the clarifying question or reasoning
+   * without a second query per row.
+   */
+  latestInterpretation: {
+    clarifyingQuestion: string | null;
+    reasoning: string | null;
+  } | null;
+}
+
+function rowToActivityItem(
+  row: BusinessEvent &
+    BusinessData & {
+      data_id: string;
+      data_created_at: string;
+      latest_clarifying_question: string | null;
+      latest_reasoning: string | null;
+    },
+): RecentActivityItem {
+  return {
+    event: {
+      id: row.id,
+      business_id: row.business_id,
+      captured_at: row.captured_at,
+      capture_mode: row.capture_mode,
+      raw_input_ref: row.raw_input_ref,
+      status: row.status,
+      superseded_by: row.superseded_by,
+      domain_hint: row.domain_hint,
+    },
+    data: {
+      id: row.data_id,
+      business_event_id: row.id,
+      type: row.type,
+      counterparty_name: row.counterparty_name,
+      amount: row.amount,
+      currency: row.currency,
+      payment_method: row.payment_method,
+      category_guess: row.category_guess,
+      confidence: row.confidence,
+      document_refs: row.document_refs,
+      created_at: row.data_created_at,
+    },
+    latestInterpretation:
+      row.latest_clarifying_question != null || row.latest_reasoning != null
+        ? {
+            clarifyingQuestion: row.latest_clarifying_question,
+            reasoning: row.latest_reasoning,
+          }
+        : null,
+  };
+}
+
+const ACTIVITY_SELECT = `
+     SELECT
+       be.id as id, be.business_id as business_id, be.captured_at as captured_at,
+       be.capture_mode as capture_mode, be.raw_input_ref as raw_input_ref,
+       be.status as status, be.superseded_by as superseded_by, be.domain_hint as domain_hint,
+       bd.id as data_id, bd.type as type, bd.counterparty_name as counterparty_name,
+       bd.amount as amount, bd.currency as currency, bd.payment_method as payment_method,
+       bd.category_guess as category_guess, bd.confidence as confidence,
+       bd.document_refs as document_refs, bd.created_at as data_created_at,
+       (SELECT ai.clarifying_question FROM ai_interpretations ai
+          WHERE ai.business_event_id = be.id
+          ORDER BY ai.requested_at DESC LIMIT 1) as latest_clarifying_question,
+       (SELECT ai.reasoning FROM ai_interpretations ai
+          WHERE ai.business_event_id = be.id
+          ORDER BY ai.requested_at DESC LIMIT 1) as latest_reasoning
+     FROM business_events be
+     JOIN business_data bd ON bd.business_event_id = be.id`;
+
+/**
+ * Reverse-chronological Business Events with their linked BusinessData —
+ * backs the Sprint 2 activity feed (Vol 7_1 minimal feed; upgraded into
+ * the full dashboard in Sprint 4).
+ */
+export async function listRecentActivity(
+  db: SqlDb,
+  businessId: string,
+  limit = 50,
+): Promise<RecentActivityItem[]> {
+  const rows = await db.queryAll<
+    BusinessEvent &
+      BusinessData & {
+        data_id: string;
+        data_created_at: string;
+        latest_clarifying_question: string | null;
+        latest_reasoning: string | null;
+      }
+  >(
+    `${ACTIVITY_SELECT}
+     WHERE be.business_id = ?
+     -- id is a secondary sort key because captured_at (millisecond ISO)
+     -- can tie under rapid successive captures; the per-day sequence
+     -- embedded in the id (Vol 11_1 Section 2) breaks ties deterministically.
+     ORDER BY be.captured_at DESC, be.id DESC
+     LIMIT ?;`,
+    [businessId, limit],
+  );
+
+  return rows.map(rowToActivityItem);
+}
+
+/**
+ * Sprint 9 — fetches a raw BusinessEvent row with no BusinessData join, so
+ * it also returns for an event that doesn't have one yet (a queued photo
+ * capture whose extraction never ran). `getActivityItemByEventId` below
+ * INNER JOINs business_data and would return null for exactly that case,
+ * which is why `resumeQueuedPhotoCaptures` (ai/capturePipeline.ts) needs
+ * this instead.
+ */
+export async function getBusinessEventById(
+  db: SqlDb,
+  eventId: string,
+): Promise<BusinessEvent | null> {
+  const rows = await db.queryAll<BusinessEvent>(
+    `SELECT * FROM business_events WHERE id = ? LIMIT 1;`,
+    [eventId],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Fetches a single Business Event + BusinessData pair by event id — used by
+ * the Capture screen to re-render a queued/processing/draft/
+ * needs_clarification event as its AI interpretation resolves, and by
+ * confirmExpenseCategory's caller to get amount/currency/payment_method
+ * without re-deriving them.
+ */
+export async function getActivityItemByEventId(
+  db: SqlDb,
+  eventId: string,
+): Promise<RecentActivityItem | null> {
+  const rows = await db.queryAll<
+    BusinessEvent &
+      BusinessData & {
+        data_id: string;
+        data_created_at: string;
+        latest_clarifying_question: string | null;
+        latest_reasoning: string | null;
+      }
+  >(`${ACTIVITY_SELECT} WHERE be.id = ? LIMIT 1;`, [eventId]);
+  return rows[0] ? rowToActivityItem(rows[0]) : null;
+}

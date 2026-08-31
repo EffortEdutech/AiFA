@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "AIFA",
+    "slug": "aifa-app",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "studio.myeffort.aifa"
+    },
+    "android": {
+      "package": "studio.myeffort.aifa"
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "AIFA uses the camera to capture receipts and invoices."
+        }
+      ]
+    ]
+  }
+}

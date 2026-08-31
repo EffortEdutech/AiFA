@@ -1,0 +1,13 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "baseUrl": ".",
+    "resolveJsonModule": true,
+    "paths": {
+      "@/*": ["src/*"],
+      "@aifa/core/*": ["../packages/core/src/*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"]
+}
