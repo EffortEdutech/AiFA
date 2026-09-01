@@ -27,7 +27,11 @@ import type {
 } from "@aifa/core/sync/envelope";
 import { setCachedLock } from "@aifa/core/sync/localState";
 import { countPendingOutbox, listPendingOutbox } from "@aifa/core/sync/outbox";
-import { pushOutbox, pullEnvelopes } from "@aifa/core/sync/syncClient";
+import {
+  pushOutbox,
+  pullEnvelopes,
+  runSyncCycle,
+} from "@aifa/core/sync/syncClient";
 import { setSyncContext, getSyncContext } from "@aifa/core/sync/syncContext";
 import { WriteGateError, assertWriteAllowed } from "@aifa/core/sync/writeGate";
 import { createTestDb } from "@aifa/core/testing/testAdapter";
@@ -262,7 +266,6 @@ describe("idempotency: replaying the same envelope twice produces zero duplicate
       [BUSINESS_ID],
     );
     expect(rows[0]?.count).toBe(1);
-
   });
 
   it("ledger_entry envelopes: applying twice never double-posts", async () => {
@@ -432,5 +435,116 @@ describe("write gate: a demoted device's write path is blocked at the code level
       DEVICE_B,
     );
     expect(result.appliedCount).toBe(2);
+  });
+});
+
+describe("runSyncCycle: demotion detection skips push instead of leaking stale writes (Vol 12_1 Section 6a.4, Sprint 17 groundwork)", () => {
+  it("pushes normally when this device IS the active device per the freshest pull", async () => {
+    const db = await freshDb();
+    const transport = new FakeTransport();
+    transport.setLock({
+      businessId: BUSINESS_ID,
+      activeDeviceId: DEVICE_A,
+      lockToken: "token-active",
+      acquiredAt: new Date().toISOString(),
+    });
+
+    setSyncContext({ businessId: BUSINESS_ID, deviceId: DEVICE_A, dek: DEK });
+    await recordManualCapture(db, {
+      businessId: BUSINESS_ID,
+      domainHint: "expense",
+      dataType: "expense",
+      description: "Written while active",
+      amount: 5,
+      currency: "MYR",
+      paymentMethod: "cash",
+    });
+    setSyncContext(null);
+
+    const result = await runSyncCycle(
+      db,
+      transport,
+      BUSINESS_ID,
+      DEK,
+      DEVICE_A,
+    );
+
+    expect(result.push.skippedDueToDemotion).toBe(false);
+    expect(result.push.pushedCount).toBe(2);
+    expect(await countPendingOutbox(db, BUSINESS_ID)).toBe(0);
+  });
+
+  it("skips push and leaves the outbox queued when this cycle's pull learns this device was demoted", async () => {
+    const db = await freshDb();
+    const transport = new FakeTransport();
+
+    // This device wrote something while it (believed it) was active...
+    setSyncContext({ businessId: BUSINESS_ID, deviceId: DEVICE_A, dek: DEK });
+    await recordManualCapture(db, {
+      businessId: BUSINESS_ID,
+      domainHint: "expense",
+      dataType: "expense",
+      description: "Written before deactivation",
+      amount: 20,
+      currency: "MYR",
+      paymentMethod: "cash",
+    });
+    setSyncContext(null);
+    // recordManualCapture inserts BOTH a business_event and a business_data row.
+    expect(await countPendingOutbox(db, BUSINESS_ID)).toBe(2);
+
+    // ...but by the time it syncs, device B has taken over.
+    transport.setLock({
+      businessId: BUSINESS_ID,
+      activeDeviceId: DEVICE_B,
+      lockToken: "token-b",
+      acquiredAt: new Date().toISOString(),
+    });
+
+    const result = await runSyncCycle(
+      db,
+      transport,
+      BUSINESS_ID,
+      DEK,
+      DEVICE_A,
+    );
+
+    expect(result.pull.lockSnapshot?.activeDeviceId).toBe(DEVICE_B);
+    expect(result.push.skippedDueToDemotion).toBe(true);
+    expect(result.push.pushedCount).toBe(0);
+    expect(result.push.remainingCount).toBe(2);
+    // The write was NOT silently sent to the server -- Section 6a.4 requires
+    // it surface for owner review (Sprint 20), not vanish either direction.
+    expect(await countPendingOutbox(db, BUSINESS_ID)).toBe(2);
+    expect(transport.allStored().length).toBe(0);
+  });
+
+  it("pushes normally when no lock has ever been broadcast -- matches writeGate.ts's own permissive default", async () => {
+    const db = await freshDb();
+    const transport = new FakeTransport(); // no setLock call -- fetchActiveDeviceLock returns null
+
+    setSyncContext({ businessId: BUSINESS_ID, deviceId: DEVICE_A, dek: DEK });
+    await recordManualCapture(db, {
+      businessId: BUSINESS_ID,
+      domainHint: "expense",
+      dataType: "expense",
+      description: "No lock ever seen",
+      amount: 8,
+      currency: "MYR",
+      paymentMethod: "cash",
+    });
+    setSyncContext(null);
+
+    const result = await runSyncCycle(
+      db,
+      transport,
+      BUSINESS_ID,
+      DEK,
+      DEVICE_A,
+    );
+
+    expect(result.pull.lockSnapshot).toBeNull();
+    expect(result.push.skippedDueToDemotion).toBe(false);
+    expect(result.push.pushedCount).toBe(2);
   });
 });

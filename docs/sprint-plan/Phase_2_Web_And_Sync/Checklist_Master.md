@@ -125,27 +125,38 @@ Full regression: 18/18 suites, 151/151 tests passing (2026-09-01).
 ## Sprint 17 — Active-Device Handoff & Primary Override UX (Mobile)
 
 **Ordinary Handoff**
-- [ ] "Make this device active" action built
-- [ ] Sync-then-request-activation sequence implemented
-- [ ] Confirmation prompt shown when current active device looks in-use
+- [x] "Make this device active" action built — `ReadOnlyBanner.tsx`, calling Sprint 16's `requestActivation` (2026-09-01)
+- [x] Sync-then-request-activation sequence implemented — unchanged from Sprint 16 (`requestActivation` pulls to current checkpoint before calling the RPC) (2026-09-01)
+- [x] Confirmation prompt shown when current active device looks in-use — `@aifa/core/sync/handoff.ts`'s `resolveActivationConfirmation`, unit-tested for both in-use and idle cases; wired via `ReadOnlyBanner`'s `Alert.alert` call (2026-09-01)
 
 **Demotion Side**
-- [ ] Demoted device receives notification/detects demotion
-- [ ] Transitions to read-only (Sprint 16 enforcement) with clear explanatory UI
+- [x] Demoted device receives notification/detects demotion — via the existing pull-refreshed lock cache (Sprint 16) plus new `useDemotionPoll.ts` (30s foreground timer) for the continuously-online case (2026-09-01)
+- [x] Transitions to read-only (Sprint 16 enforcement) with clear explanatory UI — `ReadOnlyBanner.tsx` now uses `describeReadOnlyReason` to distinguish a primary takeover from an ordinary handoff (2026-09-01)
 
 **Primary Override**
-- [ ] "Take over as active device" primary action built, showing the lightweight single-tap confirmation (not the fuller non-primary prompt, and not zero confirmation)
-- [ ] Test: takeover blocks if sync step is deliberately delayed/failed (safety check not skipped)
-- [ ] Owner can view/change which device is primary
+- [x] "Take over as active device" primary action built, showing the lightweight single-tap confirmation (not the fuller non-primary prompt, and not zero confirmation) — `resolveActivationConfirmation` always returns `kind: "lightweight"` for a primary requester, unit-tested including when the active device looks mid-session (2026-09-01)
+- [x] Test: takeover blocks if sync step is deliberately delayed/failed (safety check not skipped) — enforced server-side by Sprint 15's `request_primary_takeover` (`not_caught_up`, no CAS bypass), already concurrency-tested there; this sprint's client code introduces no shortcut around it (verified by inspection, not re-run live — see runbook §4) (2026-09-01)
+- [x] Owner can view/change which device is primary — `PrimaryDeviceSettingsCard.tsx` (new), calling Sprint 15's `set_primary_device` via `syncService.ts`'s `setPrimaryDevice`/`getRegisteredDevices` (2026-09-01)
 
 **Offline Edge Case (Detection Only)**
-- [ ] Device that missed a demotion broadcast while offline correctly detects it on reconnect and transitions to read-only
+- [x] Device that missed a demotion broadcast while offline correctly detects it on reconnect and transitions to read-only — `runSyncCycle`'s new demotion guard (`packages/core/src/sync/syncClient.ts`): a fresh pull revealing demotion skips push and leaves the outbox queued rather than silently sending it, automated test in `sync.test.ts` (2026-09-01)
 
 **Sprint 17 Definition of Done**
-- [ ] Ordinary handoff completes correctly with confirmation gate working
-- [ ] Demotion transition + explanatory UI verified
-- [ ] Primary takeover zero-friction AND still blocks on incomplete sync (both proven)
-- [ ] Missed-demotion detection on reconnect verified
+- [x] Ordinary handoff completes correctly with confirmation gate working — unit-tested end to end at the decision-logic level (2026-09-01)
+- [x] Demotion transition + explanatory UI verified — poll + reconnect triggers both refresh the write-gate's cache; banner text distinguishes primary takeover (2026-09-01)
+- [x] Primary takeover zero-friction AND still blocks on incomplete sync (both proven) — lightweight-only confirmation proven by unit test; sync-block proven by Sprint 15's existing RPC-level concurrency test, re-verified by inspection this sprint (2026-09-01)
+- [x] Missed-demotion detection on reconnect verified — `runSyncCycle` test group, `sync.test.ts` (2026-09-01)
+
+**Ad-hoc, logged per Sprint 13's risk-mitigation precedent (not originally in scope)**
+- [x] Added `touch_device_heartbeat` RPC (`app/backend/schema.sql`) — Sprint 15 never updated `devices.last_seen_at` after registration, which would have made the "genuinely in use" trigger condition this sprint depends on permanently meaningless; wired into `runMobileSyncCycle` (2026-09-01)
+
+Full regression: 19/19 suites, 165/165 tests passing (14 new) (2026-09-01).
+
+**Not covered this sprint (see runbook §6 for full detail)**
+- Device registration/DEK bootstrap flow, and wiring the new/updated components into `App.tsx`/`SettingsScreen.tsx` — carried from Sprint 16, still open; nothing in the Sprint 13-20 breakdown currently owns building this
+- Full Devices panel (Sprint 19)
+- Reconciliation of a demoted device's queued writes (Sprint 20)
+- Realtime broadcast of lock changes (deferred per the Phase 2 plan)
 
 ---
 

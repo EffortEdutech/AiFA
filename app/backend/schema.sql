@@ -449,3 +449,50 @@ end;
 $$;
 
 grant execute on function public.set_primary_device(text) to authenticated;
+
+-- ============================================================
+-- touch_device_heartbeat: Sprint 17 (Vol 12_1 Section 6a.1/6a.5's
+-- "genuinely in use" / last_seen_at signal). Sprint 15 only ever set
+-- devices.last_seen_at once, at registration -- with nothing updating it
+-- afterward, the handoff protocol's "is the current active device
+-- genuinely in use right now" check would be meaningless (a device
+-- registered weeks ago would look permanently idle regardless of actual
+-- use). This is the minimal heartbeat that keeps it meaningful: called
+-- once per successful sync cycle from the mobile client (app/src's
+-- syncService.ts), not on every keystroke -- a sync-cycle cadence is
+-- "genuinely active" enough for a lightweight in-use signal and avoids
+-- a write on every read screen view.
+-- ============================================================
+create or replace function public.touch_device_heartbeat(
+  p_device_id text,
+  p_last_synced_server_seq bigint
+) returns public.devices
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_business_id uuid := auth.uid();
+  v_row public.devices;
+begin
+  if v_business_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  update public.devices
+  set last_seen_at = now(),
+      last_synced_server_seq = p_last_synced_server_seq
+  where device_id = p_device_id
+    and business_id = v_business_id
+    and revoked_at is null
+  returning * into v_row;
+
+  if not found then
+    raise exception 'device_not_registered_or_revoked';
+  end if;
+
+  return v_row;
+end;
+$$;
+
+grant execute on function public.touch_device_heartbeat(text, bigint) to authenticated;

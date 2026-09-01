@@ -69,6 +69,39 @@ interface ActiveDeviceLockRow {
   acquired_at: string;
 }
 
+/** Row shape of public.devices (Sprint 15, Vol 12_1 Section 5a.3). */
+interface DeviceRow {
+  device_id: string;
+  business_id: string;
+  device_label: string;
+  platform: "ios" | "android" | "web";
+  registered_at: string;
+  last_seen_at: string;
+  last_synced_server_seq: number;
+  is_primary: boolean;
+  revoked_at: string | null;
+}
+
+export interface RegisteredDevice {
+  deviceId: string;
+  deviceLabel: string;
+  platform: "ios" | "android" | "web";
+  lastSeenAt: string;
+  isPrimary: boolean;
+  revokedAt: string | null;
+}
+
+function toRegisteredDevice(row: DeviceRow): RegisteredDevice {
+  return {
+    deviceId: row.device_id,
+    deviceLabel: row.device_label,
+    platform: row.platform,
+    lastSeenAt: row.last_seen_at,
+    isPrimary: row.is_primary,
+    revokedAt: row.revoked_at,
+  };
+}
+
 function toWireEnvelope(row: SyncEnvelopeRow): WireEnvelope {
   return {
     envelopeId: row.envelope_id,
@@ -180,6 +213,11 @@ export async function runMobileSyncCycle(
 ): Promise<void> {
   const db: SqlDb = await getDb();
   await runSyncCycle(db, supabaseSyncTransport, businessId, dek, deviceId);
+  // Sprint 17: piggyback the heartbeat on every sync cycle rather than a
+  // separate timer -- a cycle already means this device is online and
+  // active-ish, exactly the cadence touch_device_heartbeat's own doc
+  // calls "genuinely active enough."
+  await touchDeviceHeartbeat(businessId, deviceId);
 }
 
 export class ActivationRejectedError extends Error {}
@@ -241,4 +279,171 @@ export async function getWriteAccessState(
     isActiveDevice: lock.activeDeviceId === deviceId,
     activeDeviceId: lock.activeDeviceId,
   };
+}
+
+/**
+ * Sprint 17 (Vol 12_1 Section 6a.5, ADR-004) -- the primary-device forced
+ * takeover. Mirrors requestActivation's pull-then-RPC shape, but calls
+ * request_primary_takeover (Sprint 15) instead: no expected_lock_token
+ * compare-and-swap (the primary always wins, unconditionally), but the
+ * SAME sync-before-write precondition still runs server-side -- ADR-004
+ * does not waive that, only the confirmation-UX friction differs, and
+ * that friction lives entirely in app/src's UI layer (see
+ * @aifa/core/sync/handoff.ts's resolveActivationConfirmation), not here.
+ */
+export async function requestPrimaryTakeover(
+  businessId: string,
+  deviceId: string,
+  dek: Uint8Array,
+): Promise<void> {
+  const db: SqlDb = await getDb();
+  await pullEnvelopes(db, supabaseSyncTransport, businessId, dek, deviceId);
+
+  const lastAppliedServerSeq = await getLastAppliedServerSeq(db, businessId);
+
+  const { data, error } = await supabase.rpc("request_primary_takeover", {
+    p_device_id: deviceId,
+    p_last_applied_server_seq: lastAppliedServerSeq,
+  });
+  if (error) {
+    throw new ActivationRejectedError(error.message);
+  }
+
+  const row = data as ActiveDeviceLockRow;
+  await setCachedLock(db, {
+    businessId: row.business_id,
+    activeDeviceId: row.active_device_id,
+    lockToken: row.lock_token,
+    acquiredAt: row.acquired_at,
+  });
+}
+
+/** Sprint 17 (Vol 12_1 Section 5a.4/6a.5) -- reassigns which device is primary. Does not touch the active-device lock; a primary reassignment and an active-device handoff are orthogonal (Vol 12_1 Section 5a.4's own framing). */
+export async function setPrimaryDevice(
+  newPrimaryDeviceId: string,
+): Promise<RegisteredDevice> {
+  const { data, error } = await supabase.rpc("set_primary_device", {
+    p_new_primary_device_id: newPrimaryDeviceId,
+  });
+  if (error) throw error;
+  return toRegisteredDevice(data as DeviceRow);
+}
+
+/** Sprint 17 -- every non-revoked device registered for this business, for the minimal Settings "Primary device" picker (full Devices panel is Sprint 19). */
+export async function getRegisteredDevices(
+  businessId: string,
+): Promise<RegisteredDevice[]> {
+  const { data, error } = await supabase
+    .from("devices")
+    .select("*")
+    .eq("business_id", businessId)
+    .is("revoked_at", null)
+    .order("registered_at", { ascending: true });
+  if (error) throw error;
+  return (data as DeviceRow[]).map(toRegisteredDevice);
+}
+
+export interface ActiveDeviceInfo {
+  isActiveDevice: boolean;
+  activeDeviceId: string | null;
+  activeDeviceLabel: string | null;
+  activeDeviceIsPrimary: boolean;
+  /** Vol 12_1 Section 6a.1's "genuinely in use" signal -- see touchDeviceHeartbeat for how this stays fresh. */
+  activeDeviceLastSeenAt: string | null;
+  /** Is THIS requesting device (deviceId argument) the owner-designated primary? Drives resolveActivationConfirmation's lightweight-vs-caution branch. */
+  requestingIsPrimary: boolean;
+}
+
+/**
+ * Sprint 17 -- the one live read the handoff UI needs before it can even
+ * decide which confirmation prompt to show (@aifa/core/sync/handoff.ts's
+ * resolveActivationConfirmation) or what the read-only banner should say
+ * (describeReadOnlyReason). Deliberately a live Supabase read, not the
+ * local sync_lock_cache -- this only runs when the owner is actively
+ * about to request activation or is looking at the read-only banner
+ * on-screen, both already-online interactions, so freshness matters more
+ * than avoiding a network round trip here (unlike the write gate itself,
+ * which must work from the local cache since a write can happen offline).
+ */
+export async function getActiveDeviceInfo(
+  businessId: string,
+  deviceId: string,
+): Promise<ActiveDeviceInfo> {
+  const { data: lockData, error: lockError } = await supabase
+    .from("active_device_lock")
+    .select("*")
+    .eq("business_id", businessId)
+    .maybeSingle();
+  if (lockError) throw lockError;
+  const lock = lockData as ActiveDeviceLockRow | null;
+
+  const { data: devicesData, error: devicesError } = await supabase
+    .from("devices")
+    .select("*")
+    .eq("business_id", businessId)
+    .is("revoked_at", null);
+  if (devicesError) throw devicesError;
+  const devices = (devicesData as DeviceRow[]) ?? [];
+
+  const activeDeviceRow = lock
+    ? (devices.find((d) => d.device_id === lock.active_device_id) ?? null)
+    : null;
+  const requestingDeviceRow =
+    devices.find((d) => d.device_id === deviceId) ?? null;
+
+  return {
+    isActiveDevice: lock ? lock.active_device_id === deviceId : true, // no lock ever seen -- same default-open reasoning as getWriteAccessState/writeGate.ts
+    activeDeviceId: lock ? lock.active_device_id : null,
+    activeDeviceLabel: activeDeviceRow ? activeDeviceRow.device_label : null,
+    activeDeviceIsPrimary: activeDeviceRow ? activeDeviceRow.is_primary : false,
+    activeDeviceLastSeenAt: activeDeviceRow
+      ? activeDeviceRow.last_seen_at
+      : null,
+    requestingIsPrimary: requestingDeviceRow
+      ? requestingDeviceRow.is_primary
+      : false,
+  };
+}
+
+/**
+ * Sprint 17 (Vol 12_1 Section 6a.1's last_seen_at signal) -- keeps this
+ * device's heartbeat current. Best-effort and non-blocking: a failed
+ * heartbeat write must never fail the sync cycle it rides along with,
+ * same "never regress on a transient failure" posture as
+ * useAutoResume.ts/useSyncResume.ts's own catch blocks.
+ */
+export async function touchDeviceHeartbeat(
+  businessId: string,
+  deviceId: string,
+): Promise<void> {
+  try {
+    const db: SqlDb = await getDb();
+    const lastAppliedServerSeq = await getLastAppliedServerSeq(db, businessId);
+    await supabase.rpc("touch_device_heartbeat", {
+      p_device_id: deviceId,
+      p_last_synced_server_seq: lastAppliedServerSeq,
+    });
+  } catch {
+    // best-effort -- see doc above
+  }
+}
+
+/**
+ * Sprint 17 -- a lightweight lock-only refresh for the periodic demotion
+ * poll (useDemotionPoll.ts), distinct from a full runMobileSyncCycle:
+ * while continuously online, the DoD's "within a reasonable poll
+ * interval" requirement needs SOMETHING running on a timer even when
+ * there is no reconnect event to trigger useSyncResume's full push/pull
+ * cycle -- but running the full cycle every poll tick would mean an
+ * unnecessary push/pull round trip purely to catch a lock change. This
+ * only touches sync_lock_cache (what writeGate.ts actually reads), so
+ * it's cheap enough to run on a short interval without the overhead a
+ * full cycle would add.
+ */
+export async function refreshActiveDeviceLock(
+  businessId: string,
+): Promise<void> {
+  const db: SqlDb = await getDb();
+  const lock = await supabaseSyncTransport.fetchActiveDeviceLock(businessId);
+  if (lock) await setCachedLock(db, lock);
 }

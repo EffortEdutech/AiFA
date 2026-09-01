@@ -21,12 +21,25 @@ import {
   setCachedLock,
   setLastAppliedServerSeq,
 } from "./localState";
-import { listPendingOutbox, removeOutboxEnvelope } from "./outbox";
+import { countPendingOutbox, listPendingOutbox, removeOutboxEnvelope } from "./outbox";
 
 export interface PushResult {
   pushedCount: number;
   /** envelope_ids that failed to push and remain queued — push stops at the first failure to preserve device_seq ordering. */
   remainingCount: number;
+  /**
+   * Sprint 17 (Vol 12_1 Section 6a.4, "offline edge case" detection half).
+   * True when push was skipped entirely, not because of a transport
+   * failure, but because this cycle's own pull just learned that this
+   * device is no longer the active one -- runSyncCycle's demotion guard,
+   * not pushOutbox's own concern (pushOutbox stays an unconditional
+   * primitive; callers with a known lock state decide whether to call
+   * it). Left true/queued rather than silently pushed, per Section
+   * 6a.4's "surfaces them to the owner for review" requirement -- the
+   * review UI itself is Sprint 20's job, this flag is the plumbing it
+   * will need.
+   */
+  skippedDueToDemotion: boolean;
 }
 
 /**
@@ -49,18 +62,31 @@ export async function pushOutbox(
     try {
       await transport.pushEnvelope(envelope);
     } catch (err) {
-      return { pushedCount, remainingCount: pending.length - pushedCount };
+      return {
+        pushedCount,
+        remainingCount: pending.length - pushedCount,
+        skippedDueToDemotion: false,
+      };
     }
     await removeOutboxEnvelope(db, envelope.envelopeId);
     pushedCount += 1;
   }
 
-  return { pushedCount, remainingCount: 0 };
+  return { pushedCount, remainingCount: 0, skippedDueToDemotion: false };
 }
 
 export interface PullResult {
   appliedCount: number;
   newCheckpoint: number;
+  /**
+   * The active-device lock as refreshed by this pull, or null if the
+   * transport reports none yet (Sprint 15's first-device auto-active case
+   * or sync never having run). Sprint 17: runSyncCycle reads this to
+   * decide whether push should even attempt to run this cycle (Section
+   * 6a.4's detection half) -- exposed on the result rather than requiring
+   * a second read of the cache, since this pull just learned it fresh.
+   */
+  lockSnapshot: ActiveDeviceLockSnapshot | null;
 }
 
 /**
@@ -122,7 +148,7 @@ export async function pullEnvelopes(
   const lock = await transport.fetchActiveDeviceLock(businessId);
   if (lock) await setCachedLock(db, lock);
 
-  return { appliedCount, newCheckpoint };
+  return { appliedCount, newCheckpoint, lockSnapshot: lock };
 }
 
 export interface SyncCycleResult {
@@ -136,6 +162,15 @@ export interface SyncCycleResult {
  * push. Mirrors useAutoResume.ts's (Sprint 9) "call on mount + on
  * offline->online transition" trigger pattern; app/src wires the actual
  * trigger (see the Sprint 16 runbook for what's built there vs. deferred).
+ *
+ * Sprint 17 (Vol 12_1 Section 6a.4): if this cycle's pull just learned
+ * that this device is no longer the active one, push is skipped entirely
+ * rather than blindly flushing the outbox -- those envelopes were written
+ * "on this device before it was deactivated" (Section 6a.4's own phrase)
+ * and belong in the owner's review list (Sprint 20), not silently sent as
+ * if nothing happened. A device that IS active, or that has never seen a
+ * lock at all (no lock ever broadcast -- same permissive default
+ * writeGate.ts documents), pushes normally.
  */
 export async function runSyncCycle(
   db: SqlDb,
@@ -145,6 +180,18 @@ export async function runSyncCycle(
   deviceId: string,
 ): Promise<SyncCycleResult> {
   const pull = await pullEnvelopes(db, transport, businessId, dek, deviceId);
+
+  const isDemoted =
+    pull.lockSnapshot !== null && pull.lockSnapshot.activeDeviceId !== deviceId;
+
+  if (isDemoted) {
+    const remainingCount = await countPendingOutbox(db, businessId);
+    return {
+      pull,
+      push: { pushedCount: 0, remainingCount, skippedDueToDemotion: true },
+    };
+  }
+
   const push = await pushOutbox(db, transport, businessId);
   return { push, pull };
 }
