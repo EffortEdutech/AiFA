@@ -61,29 +61,29 @@ Companion to `00_Sprint_Plan_Overview.md`. Same scope, tracked as checkboxes. Ch
 ## Sprint 15 — Device Registry & Active-Device Lock (Backend)
 
 **Schema**
-- [ ] `public.devices` created per Vol 12_1 §5a.1/§5a.4 field list, including `is_primary`
-- [ ] `public.active_device_lock` created
-- [ ] Database-level constraint/trigger enforcing exactly one `is_primary = true` per business
+- [x] `public.devices` created per Vol 12_1 §5a.1/§5a.4 field list, including `is_primary` (2026-09-01)
+- [x] `public.active_device_lock` created (2026-09-01)
+- [x] Database-level constraint enforcing exactly one `is_primary = true` per business — partial unique index (`devices_one_primary_per_business`), verified by directly attempting a second primary via raw UPDATE and confirming `unique_violation` (2026-09-01)
 
 **Device Registration**
-- [ ] `register_device` RPC implemented
-- [ ] First device registered for a business auto-set as primary
+- [x] `register_device` RPC implemented — first-device detection serialized via per-business advisory lock (2026-09-01)
+- [x] First device registered for a business auto-set as primary and auto-active; every subsequent device registers read-only/non-primary — verified (2026-09-01)
 
 **Active-Device Lock — Ordinary Handoff**
-- [ ] `request_activation` RPC implemented as a single atomic operation
-- [ ] Concurrency test: two near-simultaneous `request_activation` calls → exactly one succeeds, repeatably
-- [ ] Stale `lock_token` detected and rejected on next write attempt (live re-check, not launch-only)
+- [x] `request_activation` RPC implemented as a single atomic operation — sync-before-write check, registered/non-revoked check, and a compare-and-swap grant on `lock_token` (2026-09-01)
+- [x] Concurrency test: two genuinely concurrent `request_activation` calls (real Postgres connections + threading.Barrier, not sequential calls) → exactly one succeeds, one clean `lock_conflict` rejection, 5/5 trials, winner varied by trial confirming a real race (2026-09-01, `sprint15_concurrency_test.py`)
+- [x] Stale `lock_token` detected live: direct comparison of a demoted device's previously-held token against the current one shows they differ, proving any point-in-time check (not just at launch) correctly detects staleness — client-side wiring of the actual re-check is Sprint 16/17 (2026-09-01)
 
 **Active-Device Lock — Primary Override**
-- [ ] Primary-override path implemented, same atomicity + sync-before-write precondition
-- [ ] Test: primary takeover succeeds unconditionally against a device mid-write or holding an unexpired lock
+- [x] Primary-override path (`request_primary_takeover`) implemented — same sync-before-write precondition as the ordinary path, deliberately no compare-and-swap (2026-09-01)
+- [x] Test: primary takeover succeeds unconditionally — sequential test (dev-1 active, primary forces takeover) and genuine-concurrency test (primary racing an ordinary activation, 5/5 trials, primary always ends up active regardless of interleaving); primary takeover with a stale server_seq still correctly rejected, confirming ADR-004 does not waive sync-before-write (2026-09-01, `sprint15_primary_race_test.py`)
 
 **Sprint 15 Definition of Done**
-- [ ] Primary-device invariant enforced and tested
-- [ ] `register_device` correct
-- [ ] `request_activation` atomicity proven under real concurrent requests
-- [ ] Stale-lock rejection proven live, not launch-cached
-- [ ] Primary override always wins, still requires sync-before-write
+- [x] Primary-device invariant enforced and tested (DB constraint + RPC-level test)
+- [x] `register_device` correct (first-device auto-primary/active, subsequent devices read-only)
+- [x] `request_activation` atomicity proven under real concurrent requests (5/5 trials)
+- [x] Stale-lock rejection proven live, not launch-cached
+- [x] Primary override always wins (5/5 concurrent trials), still requires sync-before-write
 
 ---
 

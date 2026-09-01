@@ -150,3 +150,302 @@ create policy "Users can insert their own business's envelopes"
 -- deliberately no UPDATE or DELETE policy at all. RLS defaults to denying
 -- an operation with no matching policy, so this is enforced by omission,
 -- not by an explicit "using (false)" policy.
+
+-- AIFA backend schema — Sprint 15 (Vol 12_1 §5a, §6a; ADR-003, ADR-004).
+--
+-- Device Registry + Active-Device Lock. Additive only: does not alter
+-- public.profiles, public.backups, or public.sync_envelopes.
+--
+-- Design decisions made this sprint (not fully specified in Vol 12_1's
+-- prose — see the Sprint 15 runbook for full rationale):
+--
+-- 1. Ordinary request_activation() uses optimistic concurrency (a
+--    p_expected_lock_token compare-and-swap) so that two genuinely
+--    concurrent activation requests resolve to exactly one success and
+--    one clean rejection, rather than "both succeed, last commit wins"
+--    (which would still leave the lock in a valid final state, but
+--    violates Sprint 15's explicit DoD: "confirm exactly one succeeds
+--    and the other receives a clear rejection, never both succeeding").
+--    Vol 12_1 §6a.2 does not spell out this CAS mechanism explicitly;
+--    it is a necessary refinement to make "genuinely impossible for two
+--    devices to both think they can write" (§5a.2) hold under real
+--    concurrent timing, not just sequential-looking manual tests.
+-- 2. request_primary_takeover() deliberately has NO compare-and-swap —
+--    per ADR-004 / §6a.5, primary always wins regardless of current
+--    lock holder, so it is not subject to losing a race the way the
+--    ordinary path is.
+-- 3. Both activation paths share the identical sync-before-write
+--    precondition (p_last_applied_server_seq must equal the true
+--    current max server_seq for the business) — §6a.5 is explicit that
+--    ADR-004 does not waive this for primary.
+-- 4. Every mutating operation is serialized per-business via
+--    pg_advisory_xact_lock(hashtext(business_id)), so the concurrency
+--    test's outcome is deterministic and repeatable rather than
+--    depending on incidental transaction timing.
+
+create table if not exists public.devices (
+  device_id text primary key,
+  business_id uuid not null references auth.users (id) on delete cascade,
+  device_label text not null,
+  platform text not null check (platform in ('ios', 'android', 'web')),
+  registered_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now(),
+  last_synced_server_seq bigint not null default 0,
+  is_primary boolean not null default false,
+  revoked_at timestamptz
+);
+
+-- Enforced correctness invariant (Sprint 15 DoD): exactly one primary
+-- device per business is impossible to violate at the DB level, not
+-- just discouraged by application code. "Exactly one" = "at most one"
+-- here (zero is valid transiently — see Vol 12_1 §5a.4's revocation
+-- note — and momentarily before the first device ever registers).
+create unique index if not exists devices_one_primary_per_business
+  on public.devices (business_id)
+  where is_primary = true;
+
+create index if not exists idx_devices_business_id
+  on public.devices (business_id)
+  where revoked_at is null;
+
+create table if not exists public.active_device_lock (
+  business_id uuid primary key references auth.users (id) on delete cascade,
+  active_device_id text not null references public.devices (device_id),
+  lock_token uuid not null,
+  acquired_at timestamptz not null default now()
+);
+
+alter table public.devices enable row level security;
+alter table public.active_device_lock enable row level security;
+
+-- Read-only for the owner's own rows. All mutation happens exclusively
+-- through the SECURITY DEFINER functions below (Vol 12_1 §5a.2: "a
+-- single row, mutated only through one atomic server-side operation...
+-- not a plain client-side update") — deliberately no INSERT/UPDATE/
+-- DELETE policy for the authenticated role on either table.
+create policy "Users can view their own business's devices"
+  on public.devices for select
+  using (auth.uid() = business_id);
+
+create policy "Users can view their own business's active device lock"
+  on public.active_device_lock for select
+  using (auth.uid() = business_id);
+
+-- ============================================================
+-- register_device: onboards a new device (Vol 12_1 §5a.3).
+-- First device ever registered for a business is auto-primary and
+-- auto-active (nothing to hand off from). Every subsequent device
+-- registers read-only, non-primary.
+-- ============================================================
+create or replace function public.register_device(
+  p_device_id text,
+  p_platform text,
+  p_device_label text
+) returns public.devices
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_business_id uuid := auth.uid();
+  v_is_first boolean;
+  v_row public.devices;
+  v_lock_token uuid;
+begin
+  if v_business_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  -- Serialize registration per-business so two near-simultaneous
+  -- registrations can never both believe they are "the first device".
+  perform pg_advisory_xact_lock(hashtext(v_business_id::text));
+
+  select not exists (
+    select 1 from public.devices
+    where business_id = v_business_id and revoked_at is null
+  ) into v_is_first;
+
+  insert into public.devices (
+    device_id, business_id, device_label, platform,
+    registered_at, last_seen_at, last_synced_server_seq, is_primary
+  ) values (
+    p_device_id, v_business_id, p_device_label, p_platform,
+    now(), now(), 0, v_is_first
+  )
+  returning * into v_row;
+
+  if v_is_first then
+    v_lock_token := gen_random_uuid();
+    insert into public.active_device_lock (business_id, active_device_id, lock_token, acquired_at)
+    values (v_business_id, p_device_id, v_lock_token, now());
+  end if;
+
+  return v_row;
+end;
+$$;
+
+grant execute on function public.register_device(text, text, text) to aifa_app_role;
+
+-- ============================================================
+-- request_activation: ordinary handoff (Vol 12_1 §6a.1-6a.4).
+-- Any registered, non-revoked, caught-up device may activate itself.
+-- Uses an expected-lock-token compare-and-swap so that of two
+-- concurrent requests, exactly one succeeds.
+-- ============================================================
+create or replace function public.request_activation(
+  p_device_id text,
+  p_last_applied_server_seq bigint,
+  p_expected_lock_token uuid
+) returns public.active_device_lock
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_business_id uuid := auth.uid();
+  v_true_max_seq bigint;
+  v_new_token uuid;
+  v_row public.active_device_lock;
+begin
+  if v_business_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext(v_business_id::text));
+
+  if not exists (
+    select 1 from public.devices
+    where device_id = p_device_id and business_id = v_business_id and revoked_at is null
+  ) then
+    raise exception 'device_not_registered_or_revoked';
+  end if;
+
+  select coalesce(max(server_seq), 0) into v_true_max_seq
+  from public.sync_envelopes
+  where business_id = v_business_id;
+
+  if p_last_applied_server_seq <> v_true_max_seq then
+    raise exception 'not_caught_up: device reports %, true max is %', p_last_applied_server_seq, v_true_max_seq;
+  end if;
+
+  v_new_token := gen_random_uuid();
+
+  update public.active_device_lock
+  set active_device_id = p_device_id,
+      lock_token = v_new_token,
+      acquired_at = now()
+  where business_id = v_business_id
+    and lock_token is not distinct from p_expected_lock_token
+  returning * into v_row;
+
+  if not found then
+    raise exception 'lock_conflict: the active-device lock changed since you last observed it — refresh and retry';
+  end if;
+
+  return v_row;
+end;
+$$;
+
+grant execute on function public.request_activation(text, bigint, uuid) to aifa_app_role;
+
+-- ============================================================
+-- request_primary_takeover: forced takeover (Vol 12_1 §6a.5, ADR-004).
+-- Same sync-before-write precondition as the ordinary path; NO
+-- compare-and-swap — the primary device always wins regardless of
+-- current lock holder.
+-- ============================================================
+create or replace function public.request_primary_takeover(
+  p_device_id text,
+  p_last_applied_server_seq bigint
+) returns public.active_device_lock
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_business_id uuid := auth.uid();
+  v_true_max_seq bigint;
+  v_new_token uuid;
+  v_row public.active_device_lock;
+begin
+  if v_business_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext(v_business_id::text));
+
+  if not exists (
+    select 1 from public.devices
+    where device_id = p_device_id
+      and business_id = v_business_id
+      and revoked_at is null
+      and is_primary = true
+  ) then
+    raise exception 'device_not_primary_or_revoked';
+  end if;
+
+  select coalesce(max(server_seq), 0) into v_true_max_seq
+  from public.sync_envelopes
+  where business_id = v_business_id;
+
+  if p_last_applied_server_seq <> v_true_max_seq then
+    raise exception 'not_caught_up: device reports %, true max is %', p_last_applied_server_seq, v_true_max_seq;
+  end if;
+
+  v_new_token := gen_random_uuid();
+
+  -- No CAS: primary always wins, unconditionally (ADR-004).
+  update public.active_device_lock
+  set active_device_id = p_device_id,
+      lock_token = v_new_token,
+      acquired_at = now()
+  where business_id = v_business_id
+  returning * into v_row;
+
+  return v_row;
+end;
+$$;
+
+grant execute on function public.request_primary_takeover(text, bigint) to aifa_app_role;
+
+-- ============================================================
+-- set_primary_device: atomic primary reassignment (Vol 12_1 §5a.4).
+-- ============================================================
+create or replace function public.set_primary_device(
+  p_new_primary_device_id text
+) returns public.devices
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_business_id uuid := auth.uid();
+  v_row public.devices;
+begin
+  if v_business_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext(v_business_id::text));
+
+  if not exists (
+    select 1 from public.devices
+    where device_id = p_new_primary_device_id and business_id = v_business_id and revoked_at is null
+  ) then
+    raise exception 'device_not_registered_or_revoked';
+  end if;
+
+  update public.devices
+  set is_primary = false
+  where business_id = v_business_id and is_primary = true;
+
+  update public.devices
+  set is_primary = true
+  where device_id = p_new_primary_device_id and business_id = v_business_id
+  returning * into v_row;
+
+  return v_row;
+end;
+$$;
+
+grant execute on function public.set_primary_device(text) to aifa_app_role;
