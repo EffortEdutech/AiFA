@@ -7,8 +7,14 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ConnectivityBanner } from "@/components/ConnectivityBanner";
 import { OnboardingFlow } from "@/components/OnboardingFlow";
+import { ReadOnlyBanner } from "@/components/ReadOnlyBanner";
 import { getHasCompletedOnboarding } from "@/db/client";
+import { restoreSyncContextIfBootstrapped } from "@/db/syncBootstrap";
+import { useActiveDeviceInfo } from "@/hooks/useActiveDeviceInfo";
 import { useAutoResume } from "@/hooks/useAutoResume";
+import { useDemotionPoll } from "@/hooks/useDemotionPoll";
+import { useSyncResume } from "@/hooks/useSyncResume";
+import { useAuthSession } from "@/lib/auth";
 import { installCrashReporting } from "@/lib/crashReporting";
 import AppNavigator from "@/navigation/AppNavigator";
 
@@ -50,10 +56,68 @@ export default function App() {
     };
   }, []);
 
+  // Sprint 17 -- closes the gap that sprint's own runbook flagged: until
+  // now, nothing anywhere called initMobileSync, so Sprint 16/17's sync
+  // UI was built and unit-tested but never actually reachable. Mirrors
+  // the onboarding check just above: re-derive the sync context (if this
+  // device already completed the one-time setup in SettingsScreen's Sync
+  // card) whenever the auth session changes, since business_id for sync
+  // purposes IS the signed-in owner's auth.uid() (Sprint 14). Signing in
+  // and completing sync setup are both optional and never block the rest
+  // of the app (Vol 4_4 Section 2, local-first) -- syncBusinessId/
+  // syncDeviceId/syncDek simply stay null until an owner opts in, the
+  // same fully-permissive state every pre-Sprint-16 screen already ran
+  // in.
+  const { session } = useAuthSession();
+  const [syncBusinessId, setSyncBusinessId] = useState<string | null>(null);
+  const [syncDeviceId, setSyncDeviceId] = useState<string | null>(null);
+  const [syncDek, setSyncDek] = useState<Uint8Array | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const businessId = session?.user.id ?? null;
+
+    restoreSyncContextIfBootstrapped(businessId).then((restored) => {
+      if (!isMounted) return;
+      if (restored) {
+        setSyncBusinessId(businessId);
+        setSyncDeviceId(restored.deviceId);
+        setSyncDek(restored.dek);
+      } else {
+        setSyncBusinessId(null);
+        setSyncDeviceId(null);
+        setSyncDek(null);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [session]);
+
+  useSyncResume(syncBusinessId, syncDeviceId, syncDek);
+  useDemotionPoll(syncBusinessId, isOnline);
+  const { info: activeDeviceInfo, refresh: refreshActiveDeviceInfo } =
+    useActiveDeviceInfo(syncBusinessId, syncDeviceId, isOnline);
+
   return (
     <SafeAreaProvider>
       <NavigationContainer>
         <ConnectivityBanner isOnline={isOnline} />
+        {syncBusinessId && syncDeviceId && syncDek && activeDeviceInfo && (
+          <ReadOnlyBanner
+            isActiveDevice={activeDeviceInfo.isActiveDevice}
+            activeDeviceId={activeDeviceInfo.activeDeviceId}
+            activeDeviceLabel={activeDeviceInfo.activeDeviceLabel}
+            activeDeviceIsPrimary={activeDeviceInfo.activeDeviceIsPrimary}
+            activeDeviceLastSeenAt={activeDeviceInfo.activeDeviceLastSeenAt}
+            requestingIsPrimary={activeDeviceInfo.requestingIsPrimary}
+            businessId={syncBusinessId}
+            deviceId={syncDeviceId}
+            dek={syncDek}
+            onActivated={refreshActiveDeviceInfo}
+          />
+        )}
         {!onboardingChecked ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator />

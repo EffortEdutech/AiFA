@@ -329,6 +329,30 @@ export async function setPrimaryDevice(
   return toRegisteredDevice(data as DeviceRow);
 }
 
+/**
+ * Sprint 17 (closing the device-registration gap flagged in the Sprint 17
+ * runbook) -- wraps Sprint 15's register_device RPC. Called exactly once
+ * per device, from `syncBootstrap.ts`'s `bootstrapSyncOnThisDevice`, never
+ * from anywhere else -- calling it twice for the same device_id would
+ * fail on `devices`' primary key (Sprint 15's schema), which is
+ * deliberately not swallowed here: a caller trying to register an
+ * already-registered device has a real bug to see, not a silently
+ * ignored no-op.
+ */
+export async function registerDevice(
+  deviceId: string,
+  platform: "ios" | "android" | "web",
+  deviceLabel: string,
+): Promise<RegisteredDevice> {
+  const { data, error } = await supabase.rpc("register_device", {
+    p_device_id: deviceId,
+    p_platform: platform,
+    p_device_label: deviceLabel,
+  });
+  if (error) throw error;
+  return toRegisteredDevice(data as DeviceRow);
+}
+
 /** Sprint 17 -- every non-revoked device registered for this business, for the minimal Settings "Primary device" picker (full Devices panel is Sprint 19). */
 export async function getRegisteredDevices(
   businessId: string,

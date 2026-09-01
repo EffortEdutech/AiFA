@@ -152,11 +152,18 @@ Full regression: 18/18 suites, 151/151 tests passing (2026-09-01).
 
 Full regression: 19/19 suites, 165/165 tests passing (14 new) (2026-09-01).
 
-**Not covered this sprint (see runbook §6 for full detail)**
-- Device registration/DEK bootstrap flow, and wiring the new/updated components into `App.tsx`/`SettingsScreen.tsx` — carried from Sprint 16, still open; nothing in the Sprint 13-20 breakdown currently owns building this
+**Ad-hoc addendum, same day — planning-gap closure requested by owner before Sprint 18**
+- [x] Device registration / DEK-bootstrap flow built and wired end to end — `app/src/db/syncBootstrap.ts` (new: `bootstrapSyncOnThisDevice`, `restoreSyncContextIfBootstrapped`), `app/src/db/client.ts` (`getOrCreateSyncDeviceId`, recovery-code storage, `hasCompletedSyncBootstrap`), `app/src/db/syncService.ts` (`registerDevice`), `app/src/components/SyncSetupCard.tsx` (new Settings-screen setup UI), `app/src/hooks/useActiveDeviceInfo.ts` (new, 30s foreground poll feeding the banner) (2026-09-01)
+- [x] `App.tsx` rewritten to actually call `restoreSyncContextIfBootstrapped` on launch and wire `useSyncResume`/`useDemotionPoll`/`useActiveDeviceInfo`/`ReadOnlyBanner` for real — Sprint 16 and 17's UI is now reachable in the running app, not just unit-tested (2026-09-01)
+- [x] `SettingsScreen.tsx` gets a new "Sync" section: `SyncSetupCard` until bootstrapped, then `PrimaryDeviceSettingsCard` (2026-09-01)
+- [x] `tsc --noEmit` and `eslint` clean; full regression re-run with no change in count (19/19 suites, 165/165 tests) — this addendum's RPC/SecureStore-touching glue code is verified via tsc/eslint and disclosed as not exercised on a live device, consistent with this project's established precedent for `syncService.ts` code since Sprint 16, not force-tested with mocks the project has never used elsewhere (2026-09-01)
+- See runbook §6 for full detail.
+
+**Not covered this sprint (see runbook §7 for full detail)**
 - Full Devices panel (Sprint 19)
 - Reconciliation of a demoted device's queued writes (Sprint 20)
 - Realtime broadcast of lock changes (deferred per the Phase 2 plan)
+- Polished pairing UX (recovery-code sharing, QR, etc.) — Sprint 19 candidate
 
 ---
 

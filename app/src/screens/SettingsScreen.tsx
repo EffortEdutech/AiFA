@@ -26,9 +26,12 @@ import {
 import accountingRules from "../../../packages/core/pka/accounting_rules.json";
 
 import BYOKSettingsCard from "@/components/BYOKSettingsCard";
+import PrimaryDeviceSettingsCard from "@/components/PrimaryDeviceSettingsCard";
+import SyncSetupCard from "@/components/SyncSetupCard";
 import { getDb, getDeviceEncryptionKey, getLocalBusinessId } from "@/db/client";
 import { deleteRemoteAccountData } from "@/db/deletionService";
 import { writeExportFiles } from "@/db/exportService";
+import { hasCompletedSyncBootstrap } from "@/db/syncBootstrap";
 import { requestOtp, signOut, useAuthSession, verifyOtp } from "@/lib/auth";
 
 /**
@@ -73,6 +76,28 @@ export default function SettingsScreen() {
   const [otpStage, setOtpStage] = useState<"email" | "code">("email");
   const [authBusy, setAuthBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
+
+  // Sprint 17 -- sync setup status for this device, re-checked whenever
+  // the auth session changes (sign-in is the precondition, per
+  // syncBootstrap.ts's own doc). null while unknown/unchecked so the
+  // Sync card doesn't flash the "not set up" state for a signed-in owner
+  // who actually already completed this on a previous visit.
+  const [syncBootstrapped, setSyncBootstrapped] = useState<boolean | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!session) {
+      setSyncBootstrapped(null);
+      return;
+    }
+    let isMounted = true;
+    hasCompletedSyncBootstrap().then((done) => {
+      if (isMounted) setSyncBootstrapped(done);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [session]);
 
   const [recoveryCodeRevealed, setRecoveryCodeRevealed] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
@@ -508,6 +533,26 @@ export default function SettingsScreen() {
           configured, same graceful-degradation pattern as every other
           optional feature on this screen. */}
       {session && <BYOKSettingsCard />}
+
+      {/* Sync — Sprint 17, closing the gap where nothing ever called
+          initMobileSync. Only meaningful once signed in, same reasoning
+          as BYOKSettingsCard above -- business_id for cloud sync purposes
+          IS auth.uid() (Sprint 14). */}
+      {session &&
+        (syncBootstrapped === false ? (
+          <SyncSetupCard
+            businessId={session.user.id}
+            onBootstrapped={() => setSyncBootstrapped(true)}
+          />
+        ) : syncBootstrapped === true ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Sync</Text>
+            <Text style={styles.placeholderText}>
+              Sync is enabled on this device.
+            </Text>
+            <PrimaryDeviceSettingsCard businessId={session.user.id} />
+          </View>
+        ) : null)}
 
       {/* Data & Privacy — Vol 7_7 */}
       <View style={styles.card}>

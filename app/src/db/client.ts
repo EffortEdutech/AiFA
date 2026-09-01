@@ -102,6 +102,57 @@ export async function setOnboardingCompleted(): Promise<void> {
   await SecureStore.setItemAsync("aifa_onboarding_complete", "true");
 }
 
+/**
+ * Sprint 17 (closing the gap flagged in that sprint's own runbook §6):
+ * device registration/DEK-bootstrap never existed anywhere in the
+ * Sprint 13-20 breakdown, which meant Sprint 16/17's sync UI was built
+ * and unit-tested but never actually reachable in the running app --
+ * nothing ever called `initMobileSync`. These four functions are the
+ * missing local-identity half of that gap (`db/syncBootstrap.ts` is the
+ * orchestration half) -- same SecureStore-backed pattern as
+ * `getLocalBusinessId`/`getDeviceEncryptionKey` above, kept in this file
+ * for the same reason those are: only needed alongside the database.
+ *
+ * `aifa_sync_device_id` is THIS device's stable id for Sprint 15's device
+ * registry -- separate from `aifa_local_business_id` above (which is a
+ * pre-cloud, single-device concept Sprint 14's `reconcileLocalBusinessId`
+ * exists to retire) and separate from `aifa_db_key` (which stays this
+ * device's own SQLCipher key regardless of whether it's also currently
+ * serving as the sync recovery code -- see `getDeviceEncryptionKey`'s doc).
+ */
+export async function getOrCreateSyncDeviceId(): Promise<string> {
+  const existing = await SecureStore.getItemAsync("aifa_sync_device_id");
+  if (existing) return existing;
+
+  const id = await randomHex(16);
+  await SecureStore.setItemAsync("aifa_sync_device_id", id);
+  return id;
+}
+
+/**
+ * The recovery code THIS device used to derive the Business DEK (Vol
+ * 12_1 Section 5/Section 9) -- for the first device on a business this is
+ * that device's own `getDeviceEncryptionKey()` value; for every
+ * subsequent device it is whatever the owner typed in from the first
+ * device's "reveal recovery code" control (Sprint 10, `SettingsScreen`).
+ * Persisted so the DEK can be re-derived on every app launch
+ * (`syncBootstrap.ts`'s `restoreSyncContextIfBootstrapped`) without ever
+ * storing the derived key itself.
+ */
+export async function getStoredSyncRecoveryCode(): Promise<string | null> {
+  return SecureStore.getItemAsync("aifa_sync_recovery_code");
+}
+
+export async function storeSyncRecoveryCode(code: string): Promise<void> {
+  await SecureStore.setItemAsync("aifa_sync_recovery_code", code);
+}
+
+/** True once this device has completed the one-time sync bootstrap (device id claimed, recovery code known). */
+export async function hasCompletedSyncBootstrap(): Promise<boolean> {
+  const code = await getStoredSyncRecoveryCode();
+  return code !== null;
+}
+
 export async function getDb(): Promise<SqlDb> {
   if (dbInstance) return dbInstance;
   if (dbReadyPromise) return dbReadyPromise;
