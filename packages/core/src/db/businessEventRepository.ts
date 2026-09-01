@@ -20,6 +20,7 @@
  */
 import type { SqlDb } from "./types";
 import { assertSyncGateOk, enqueueSyncableWrite } from "../sync/syncHooks";
+import { BUSINESS_EVENTS_IMMUTABLE_TRIGGER_SQL } from "./migrations";
 
 export type CaptureMode = "voice" | "text" | "photo" | "document" | "manual";
 export type BusinessEventStatus =
@@ -462,6 +463,89 @@ export async function setSupersededBy(
     "status_transition",
     { originalEventId, correctingEventId },
   );
+}
+
+/**
+ * Sprint 20 (Vol 12_1 Section 7.2) — a privileged, narrowly-scoped
+ * override used ONLY by sync/reconciliation.ts's offline-demoted-device
+ * backstop. Never call this from a normal write path.
+ *
+ * Why it has to exist: the migration-4 trigger (see
+ * BUSINESS_EVENTS_IMMUTABLE_TRIGGER_SQL) permits exactly one
+ * NULL->value superseded_by transition and explicitly forbids
+ * un-superseding. That is exactly right for every ordinary write path --
+ * but Section 7.2's backstop case needs one deliberate exception: a
+ * device that captured a correction offline, unaware it had been
+ * demoted, may have already applied ITS OWN correction locally (a
+ * legitimate NULL->value transition at the time, on that device) before
+ * ever learning that a DIFFERENT device's competing correction reached
+ * the server first and is the one that must canonically stand. That
+ * device's local row is left pointing at the losing correction, and the
+ * trigger (correctly, by its own rules) then refuses to let the
+ * winning, pulled transition overwrite it -- see applyEnvelope.ts's
+ * comment on exactly this rejection.
+ *
+ * The fix is not to weaken the trigger (every normal write path still
+ * needs its guarantee) -- it is to let the reconciliation path, and only
+ * that path, un-supersede the one row it has already independently
+ * proven is this device's own not-yet-pushed losing write (never a
+ * pulled/server-confirmed one), so it can then reapply the correct
+ * winning transition through the SAME trigger-enforced path every other
+ * device uses. Scoped to a single row, single call, immediately
+ * followed by trigger restoration in a finally block so no other write
+ * anywhere in the app can ever run while the trigger is down.
+ */
+export async function forceResetSupersededByForReconciliation(
+  db: SqlDb,
+  eventId: string,
+  newValue: string | null,
+): Promise<void> {
+  await db.execute(`DROP TRIGGER IF EXISTS business_events_immutable_once_confirmed;`);
+  try {
+    await db.execute(`UPDATE business_events SET superseded_by = ? WHERE id = ?;`, [
+      newValue,
+      eventId,
+    ]);
+  } finally {
+    await db.execute(BUSINESS_EVENTS_IMMUTABLE_TRIGGER_SQL);
+  }
+}
+
+/**
+ * Sprint 20 — the correcting BusinessData row for a given BusinessEvent
+ * id (a correction always has exactly one, per capturePipeline.ts's
+ * correctConfirmedCapture). Used by sync/reconciliation.ts to find the
+ * rows that must be deleted alongside a discarded losing correction.
+ */
+export async function getBusinessDataByEventId(
+  db: SqlDb,
+  eventId: string,
+): Promise<BusinessData | null> {
+  const rows = await db.queryAll<BusinessData>(
+    `SELECT * FROM business_data WHERE business_event_id = ? LIMIT 1;`,
+    [eventId],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Sprint 20 — deletes a discarded correction's BusinessEvent + BusinessData
+ * rows. Only ever called by sync/reconciliation.ts, and only on a
+ * correction bundle that (a) lost Section 7.2's backstop conflict and
+ * (b) was NEVER pushed (still sitting, at time of call, in this device's
+ * own outbox) -- so this is deleting purely local, not-yet-shared data,
+ * never anything another device could already have. Ledger entries are
+ * handled separately by ledgerRepository.deleteLedgerEntriesForBusinessData
+ * (reconciliation.ts calls both, in the right order for FK-shaped data
+ * even though this schema has no formal FK constraints).
+ */
+export async function deleteDiscardedCorrectionEventAndData(
+  db: SqlDb,
+  eventId: string,
+  dataId: string,
+): Promise<void> {
+  await db.execute(`DELETE FROM business_data WHERE id = ?;`, [dataId]);
+  await db.execute(`DELETE FROM business_events WHERE id = ?;`, [eventId]);
 }
 
 export interface RecentActivityItem {

@@ -16,6 +16,34 @@ export interface Migration {
   statements: string[];
 }
 
+/**
+ * Migration 4's trigger DDL, factored out to a named export — Sprint 20
+ * (Vol 12_1 Section 7.2). The migration below still owns the shipped
+ * behaviour (never edited, per this file's own discipline); this constant
+ * exists purely so sync/reconciliation.ts's privileged
+ * drop-update-recreate override (used ONLY to correct a demoted device's
+ * own premature local superseded_by write, Section 7.2's backstop case)
+ * reproduces the EXACT current trigger rather than a hand-copied,
+ * driftable second copy of this DDL.
+ */
+export const BUSINESS_EVENTS_IMMUTABLE_TRIGGER_SQL = `CREATE TRIGGER business_events_immutable_once_confirmed
+         BEFORE UPDATE ON business_events
+         WHEN OLD.status = 'confirmed'
+           AND NOT (
+             NEW.id = OLD.id
+             AND NEW.business_id = OLD.business_id
+             AND NEW.captured_at = OLD.captured_at
+             AND NEW.capture_mode = OLD.capture_mode
+             AND NEW.raw_input_ref IS OLD.raw_input_ref
+             AND NEW.status = OLD.status
+             AND NEW.domain_hint = OLD.domain_hint
+             AND OLD.superseded_by IS NULL
+             AND NEW.superseded_by IS NOT NULL
+           )
+       BEGIN
+         SELECT RAISE(ABORT, 'BusinessEvent rows are immutable once confirmed, except for a single one-time superseded_by linkage (Vol 4_0 Section 7).');
+       END;`;
+
 export const migrations: Migration[] = [
   {
     version: 1,
@@ -161,23 +189,7 @@ export const migrations: Migration[] = [
     name: "allow_superseded_by_linkage_on_confirmed_events",
     statements: [
       `DROP TRIGGER IF EXISTS business_events_immutable_once_confirmed;`,
-      `CREATE TRIGGER business_events_immutable_once_confirmed
-         BEFORE UPDATE ON business_events
-         WHEN OLD.status = 'confirmed'
-           AND NOT (
-             NEW.id = OLD.id
-             AND NEW.business_id = OLD.business_id
-             AND NEW.captured_at = OLD.captured_at
-             AND NEW.capture_mode = OLD.capture_mode
-             AND NEW.raw_input_ref IS OLD.raw_input_ref
-             AND NEW.status = OLD.status
-             AND NEW.domain_hint = OLD.domain_hint
-             AND OLD.superseded_by IS NULL
-             AND NEW.superseded_by IS NOT NULL
-           )
-       BEGIN
-         SELECT RAISE(ABORT, 'BusinessEvent rows are immutable once confirmed, except for a single one-time superseded_by linkage (Vol 4_0 Section 7).');
-       END;`,
+      BUSINESS_EVENTS_IMMUTABLE_TRIGGER_SQL,
     ],
   },
   {

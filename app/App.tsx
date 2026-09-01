@@ -6,6 +6,7 @@ import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ConnectivityBanner } from "@/components/ConnectivityBanner";
+import { DemotedOutboxReview } from "@/components/DemotedOutboxReview";
 import { OnboardingFlow } from "@/components/OnboardingFlow";
 import { ReadOnlyBanner } from "@/components/ReadOnlyBanner";
 import { getHasCompletedOnboarding } from "@/db/client";
@@ -95,7 +96,11 @@ export default function App() {
     };
   }, [session]);
 
-  useSyncResume(syncBusinessId, syncDeviceId, syncDek);
+  const { demotedOutboxReview } = useSyncResume(
+    syncBusinessId,
+    syncDeviceId,
+    syncDek,
+  );
   useDemotionPoll(syncBusinessId, isOnline);
   const { info: activeDeviceInfo, refresh: refreshActiveDeviceInfo } =
     useActiveDeviceInfo(syncBusinessId, syncDeviceId, isOnline);
@@ -116,6 +121,12 @@ export default function App() {
             deviceId={syncDeviceId}
             dek={syncDek}
             onActivated={refreshActiveDeviceInfo}
+          />
+        )}
+        {syncBusinessId && demotedOutboxReview && (
+          <DemotedOutboxReview
+            businessId={syncBusinessId}
+            review={demotedOutboxReview}
           />
         )}
         {!onboardingChecked ? (

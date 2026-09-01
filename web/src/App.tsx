@@ -23,6 +23,7 @@ import { LocalDataClearedError, openIndexedDbSqlAdapter, clearLocalDbFile } from
 import { initWebSync } from "./lib/syncService";
 import { useWebSync } from "./hooks/useWebSync";
 import { ReadOnlyBanner } from "./components/ReadOnlyBanner";
+import { DemotedOutboxReview } from "./components/DemotedOutboxReview";
 
 type Tab = "dashboard" | "capture" | "workspace" | "settings";
 
@@ -97,7 +98,7 @@ export default function App(): JSX.Element {
     initWebSync(identity.businessId, identity.deviceId, identity.dek);
   }, [identity, db]);
 
-  const { activeDeviceInfo, refreshActiveDeviceInfo } = useWebSync(
+  const { activeDeviceInfo, refreshActiveDeviceInfo, demotedOutboxReview } = useWebSync(
     db,
     identity?.businessId ?? null,
     identity?.deviceId ?? null,
@@ -148,6 +149,13 @@ export default function App(): JSX.Element {
           dek={identity.dek}
           info={activeDeviceInfo}
           onActivated={refreshActiveDeviceInfo}
+        />
+      )}
+      {identity && demotedOutboxReview && (
+        <DemotedOutboxReview
+          db={db}
+          businessId={identity.businessId}
+          review={demotedOutboxReview}
         />
       )}
       <h1 style={{ fontSize: 22 }}>AiFA</h1>

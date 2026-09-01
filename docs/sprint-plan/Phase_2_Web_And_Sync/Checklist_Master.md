@@ -237,27 +237,35 @@ Full regression re-run after this sprint (packages/core and app/ untouched): 19/
 ## Sprint 20 — Offline Reconciliation Backstop, Hardening & Pilot
 
 **Offline Reconciliation Backstop**
-- [ ] Append-only entities reconcile correctly (BusinessEvent insert, BusinessData, LedgerEntry, Document, AiInterpretation)
-- [ ] BusinessEvent status-transition conflict case resolved per Vol 12_1 §7.2's specified rule, tested with a real offline-then-reconnect scenario
-- [ ] BusinessKnowledgeEntry / AppSettings resolved per Vol 12_1 §7.3's specified rule
-- [ ] Every row of the §7.4 summary table has a passing automated test
+- [x] Append-only entities reconcile correctly (BusinessEvent insert, BusinessData, LedgerEntry, Document, AiInterpretation) — `packages/core/src/sync/reconciliation.ts`; no special handling needed (§7.1), tested end to end (2026-09-01)
+- [x] BusinessEvent status-transition conflict case resolved per Vol 12_1 §7.2's specified rule, tested with a real offline-then-reconnect scenario — `resolveStatusTransitionConflicts`; a real, previously-latent double-counting/permanently-wrong-local-view bug found and fixed (see runbook §1.2/§2) (2026-09-01)
+- [x] BusinessKnowledgeEntry / AppSettings resolved per Vol 12_1 §7.3's specified rule — never discarded, provenance note attached (2026-09-01)
+- [x] Every row of the §7.4 summary table has a passing automated test — `app/src/db/__tests__/sprint20_reconciliation.test.ts`, 6/6 passing (2026-09-01)
 
 **Bug Bash**
-- [ ] Structured bug-hunt pass completed across Sprints 14–19's system
-- [ ] Zero unresolved data-loss / duplicate-event / incorrect-ledger findings
+- [x] Structured bug-hunt pass completed across Sprints 14–19's system (2026-09-01)
+- [ ] Zero unresolved data-loss / duplicate-event / incorrect-ledger findings — **not fully met**: one real, disclosed finding remains open (`generateBusinessEventId`'s cross-device id-collision risk, runbook §2) — found empirically, deliberately not ad-hoc-patched under this sprint's own deadline per this sprint's own risk-table guidance, logged as the top-priority follow-up instead
 
 **Multi-Device Pilot**
-- [ ] Real owner running 2+ of their own devices for at least 1 full week
-- [ ] Every handoff/takeover/demotion logged and cross-checked against the Devices panel's own record
+- [ ] Real owner running 2+ of their own devices for at least 1 full week — **not run this sprint**, owner action required (same class of gap as Phase 1 Sprint 12's pilot/distribution items; cannot be fabricated in this sandbox)
+- [ ] Every handoff/takeover/demotion logged and cross-checked against the Devices panel's own record — blocked on the pilot above
 
 **Exit Criteria Verification**
-- [ ] Every item in `00_Sprint_Plan_Overview.md` §5 checked off with evidence (test, screenshot, or pilot log)
+- [x] Every item in `00_Sprint_Plan_Overview.md` §5 checked with evidence — 6 of 7 met with evidence; #5 substantially met with one disclosed exception, #7 (the pilot) not met — see runbook §4 for the full item-by-item walkthrough, nothing assumed
 
 **Sprint 20 Definition of Done**
-- [ ] All reconciliation table rows tested and passing
-- [ ] Bug bash findings resolved or explicitly triaged
-- [ ] Pilot week completed with usage log
-- [ ] All Phase 2 exit criteria verified with evidence, none assumed
+- [x] All reconciliation table rows tested and passing (2026-09-01)
+- [ ] Bug bash findings resolved or explicitly triaged — the §7.2 finding is resolved; the id-collision finding is triaged (disclosed, prioritized as a follow-up) rather than resolved
+- [ ] Pilot week completed with usage log — not done, owner action required
+- [x] All Phase 2 exit criteria verified with evidence, none assumed — verified as either met, substantially-met-with-a-named-exception, or genuinely not met; see runbook §4 (2026-09-01)
+
+Full regression after this sprint: 20/20 suites, 171/171 tests (165 carried forward + 6 new), tsc/eslint clean on both `app/` and `web/`; `web/`'s `vite build` and `verify:sqljs-parity` both clean (2026-09-01).
+
+**Not covered this sprint (see runbook §6 for full detail)**
+- The real multi-device pilot — owner action required
+- The `generateBusinessEventId` cross-device collision fix — logged as the top-priority follow-up
+- DEK rotation / full revocation (Vol 12_1 §12, long-standing open item)
+- Realtime lock broadcast (still polling-based)
 
 ---
 

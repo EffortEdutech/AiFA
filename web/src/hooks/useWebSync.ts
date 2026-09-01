@@ -7,6 +7,7 @@ import {
   refreshActiveDeviceLock,
   runWebSyncCycle,
   type ActiveDeviceInfo,
+  type DemotedOutboxReview,
 } from "../lib/syncService";
 
 const DEMOTION_POLL_INTERVAL_MS = 30_000;
@@ -15,6 +16,8 @@ export interface UseWebSyncResult {
   isOnline: boolean;
   activeDeviceInfo: ActiveDeviceInfo | null;
   refreshActiveDeviceInfo: () => void;
+  /** Sprint 20 (Vol 12_1 Section 6a.4) — see app/src/hooks/useSyncResume.ts's own doc on this field for the full reasoning; identical here. */
+  demotedOutboxReview: DemotedOutboxReview | null;
 }
 
 /**
@@ -49,6 +52,8 @@ export function useWebSync(
     typeof navigator === "undefined" ? true : navigator.onLine,
   );
   const [activeDeviceInfo, setActiveDeviceInfo] = useState<ActiveDeviceInfo | null>(null);
+  const [demotedOutboxReview, setDemotedOutboxReview] =
+    useState<DemotedOutboxReview | null>(null);
   const [bumpCount, setBumpCount] = useState(0);
   const wasOnline = useRef<boolean | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -71,11 +76,13 @@ export function useWebSync(
     const firstRunOnline = isOnline && wasOnline.current === null;
 
     if ((justCameOnline || firstRunOnline) && db && businessId && deviceId && dek) {
-      runWebSyncCycle(db, businessId, deviceId, dek).catch(() => {
-        // Best-effort, same posture as mobile's useSyncResume.ts -- a
-        // failed cycle leaves the outbox/checkpoint exactly as they
-        // already were; the next trigger tries again.
-      });
+      runWebSyncCycle(db, businessId, deviceId, dek)
+        .then((review) => setDemotedOutboxReview(review))
+        .catch(() => {
+          // Best-effort, same posture as mobile's useSyncResume.ts -- a
+          // failed cycle leaves the outbox/checkpoint exactly as they
+          // already were; the next trigger tries again.
+        });
     }
 
     wasOnline.current = isOnline;
@@ -125,6 +132,7 @@ export function useWebSync(
   return {
     isOnline,
     activeDeviceInfo,
+    demotedOutboxReview,
     refreshActiveDeviceInfo: () => setBumpCount((c) => c + 1),
   };
 }

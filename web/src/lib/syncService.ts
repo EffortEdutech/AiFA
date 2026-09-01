@@ -34,12 +34,13 @@ import {
   type ActiveDeviceInfo,
   type RegisteredDevice,
 } from "@aifa/core/sync/supabaseTransport";
-import { runSyncCycle, pullEnvelopes } from "@aifa/core/sync/syncClient";
+import { runSyncCycle, pullEnvelopes, pushOutbox } from "@aifa/core/sync/syncClient";
 import { setSyncContext } from "@aifa/core/sync/syncContext";
+import type { DemotedOutboxReview } from "@aifa/core/sync/reconciliation";
 
 import { supabase } from "./supabaseClient";
 
-export type { RegisteredDevice, ActiveDeviceInfo };
+export type { RegisteredDevice, ActiveDeviceInfo, DemotedOutboxReview };
 
 /** Shared with app/src/db/syncService.ts's own instance — same query/RPC shapes, different `supabase` client object underneath (@aifa/core/sync/supabaseTransport.ts). */
 export const supabaseSyncTransport = createSupabaseSyncTransport(supabase);
@@ -60,17 +61,33 @@ export function initWebSync(
   setSyncContext({ businessId, deviceId, dek });
 }
 
-/** Runs one push+pull cycle against the real Supabase transport, using this browser's real local database. */
+/**
+ * Runs one push+pull cycle against the real Supabase transport, using
+ * this browser's real local database. Sprint 20: returns the Section
+ * 6a.4 review summary when this cycle discovered a demotion, mirroring
+ * app/src/db/syncService.ts's own runMobileSyncCycle -- see that file's
+ * doc for the full reasoning (Section 7.2's conflict resolution has
+ * already run and mutated local state by the time this resolves).
+ */
 export async function runWebSyncCycle(
   db: SqlDb,
   businessId: string,
   deviceId: string,
   dek: Uint8Array,
-): Promise<void> {
-  await runSyncCycle(db, supabaseSyncTransport, businessId, dek, deviceId);
+): Promise<DemotedOutboxReview | null> {
+  const result = await runSyncCycle(db, supabaseSyncTransport, businessId, dek, deviceId);
   // Mirrors mobile syncService.ts's runMobileSyncCycle: piggyback the
   // heartbeat on every sync cycle rather than a separate timer.
   await touchDeviceHeartbeat(db, businessId, deviceId);
+  return result.demotedOutboxReview;
+}
+
+/** Mirrors app/src/db/syncService.ts's sendReviewedDemotedOutbox — see that file's own doc for the full Section 6a.4 reasoning, identical here. */
+export async function sendReviewedDemotedOutbox(
+  db: SqlDb,
+  businessId: string,
+): Promise<void> {
+  await pushOutbox(db, supabaseSyncTransport, businessId);
 }
 
 export class ActivationRejectedError extends Error {}

@@ -10,18 +10,31 @@
  * means pushOutbox/pullEnvelopes both see "no context" and do nothing,
  * matching every other syncable write's same safe default.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { runMobileSyncCycle } from "@/db/syncService";
+import { runMobileSyncCycle, type DemotedOutboxReview } from "@/db/syncService";
 import { useConnectivity } from "@/lib/connectivity";
 
 export function useSyncResume(
   businessId: string | null,
   deviceId: string | null,
   dek: Uint8Array | null,
-): { isOnline: boolean } {
+): {
+  isOnline: boolean;
+  /**
+   * Sprint 20 (Vol 12_1 Section 6a.4) — the latest demotion review this
+   * hook's own sync cycle turned up, or null once there is nothing left
+   * (never demoted, or the owner already sent everything safe and there
+   * were no conflicts left to report). Cleared to null on every cycle
+   * that finds nothing, so a stale review never lingers past the point
+   * it stopped being true.
+   */
+  demotedOutboxReview: DemotedOutboxReview | null;
+} {
   const { isOnline } = useConnectivity();
   const wasOnline = useRef<boolean | null>(null);
+  const [demotedOutboxReview, setDemotedOutboxReview] =
+    useState<DemotedOutboxReview | null>(null);
 
   useEffect(() => {
     const justCameOnline = isOnline && wasOnline.current === false;
@@ -30,7 +43,8 @@ export function useSyncResume(
     if ((justCameOnline || firstRunOnline) && businessId && deviceId && dek) {
       (async () => {
         try {
-          await runMobileSyncCycle(businessId, deviceId, dek);
+          const review = await runMobileSyncCycle(businessId, deviceId, dek);
+          setDemotedOutboxReview(review);
         } catch {
           // Best-effort, same as useAutoResume.ts: a failed sync cycle
           // leaves the outbox/checkpoint exactly as they already were --
@@ -42,5 +56,5 @@ export function useSyncResume(
     wasOnline.current = isOnline;
   }, [isOnline, businessId, deviceId, dek]);
 
-  return { isOnline };
+  return { isOnline, demotedOutboxReview };
 }

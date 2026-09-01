@@ -14,6 +14,10 @@
  */
 import type { SqlDb } from "../db/types";
 import { applyPulledEnvelope } from "./applyEnvelope";
+import {
+  reconcileAndReviewDemotedOutbox,
+  type DemotedOutboxReview,
+} from "./reconciliation";
 import type { ActiveDeviceLockSnapshot, OutboxEnvelope, SyncTransport, WireEnvelope } from "./envelope";
 import {
   ensureLocalSyncState,
@@ -87,6 +91,24 @@ export interface PullResult {
    * a second read of the cache, since this pull just learned it fresh.
    */
   lockSnapshot: ActiveDeviceLockSnapshot | null;
+  /**
+   * Sprint 20 (Vol 12_1 Section 7.2) — envelopes this pull could NOT
+   * apply, most commonly a status_transition that lost the migration-4
+   * trigger's one-shot race (see applyEnvelope.ts). Previously silently
+   * discarded (a correct sync outcome on its own); now surfaced so
+   * sync/reconciliation.ts can tell a genuine "someone else already
+   * confirmed/corrected this" outcome apart from this device's own
+   * not-yet-pushed conflicting write, and resolve the latter instead of
+   * leaving it stuck.
+   */
+  failedEnvelopes: WireEnvelope[];
+  /**
+   * Sprint 20 (Vol 12_1 Section 7.3) — envelopes this pull DID apply,
+   * exposed so reconciliation.ts can build a provenance note ("also
+   * updated on <device>") for a business_knowledge_entry/app_settings
+   * item still queued in this device's own outbox for the same id.
+   */
+  appliedEnvelopes: WireEnvelope[];
 }
 
 /**
@@ -127,19 +149,24 @@ export async function pullEnvelopes(
 
   let appliedCount = 0;
   let newCheckpoint = checkpoint;
+  const failedEnvelopes: WireEnvelope[] = [];
+  const appliedEnvelopes: WireEnvelope[] = [];
 
   for (const envelope of sorted) {
     if (envelope.serverSeq == null) continue;
     try {
       await applyPulledEnvelope(db, envelope, dek);
       appliedCount += 1;
+      appliedEnvelopes.push(envelope);
     } catch {
       // Vol 12_1 Section 7.2 -- a losing status_transition is a correct,
       // expected rejection (the migration-4 trigger enforcing "only one
       // supersede wins"), not a sync failure. Any other apply failure is
       // logged by the caller's own error handling (app/src) but must not
       // block the rest of this pull batch or leave the checkpoint stuck
-      // behind a single bad envelope.
+      // behind a single bad envelope. Sprint 20: recorded (not just
+      // swallowed) so reconciliation.ts can inspect what actually failed.
+      failedEnvelopes.push(envelope);
     }
     newCheckpoint = envelope.serverSeq;
     await setLastAppliedServerSeq(db, businessId, newCheckpoint);
@@ -148,12 +175,21 @@ export async function pullEnvelopes(
   const lock = await transport.fetchActiveDeviceLock(businessId);
   if (lock) await setCachedLock(db, lock);
 
-  return { appliedCount, newCheckpoint, lockSnapshot: lock };
+  return { appliedCount, newCheckpoint, lockSnapshot: lock, failedEnvelopes, appliedEnvelopes };
 }
 
 export interface SyncCycleResult {
   push: PushResult;
   pull: PullResult;
+  /**
+   * Sprint 20 (Vol 12_1 Section 7) — set only on a cycle where this
+   * pull's lock snapshot revealed a demotion. Section 7.2's conflict
+   * resolution has ALREADY run and mutated local state by the time this
+   * is returned (see reconciliation.ts); this is the review-list
+   * summary for the owner's "N items captured before deactivation"
+   * screen (Section 6a.4), not a pending action.
+   */
+  demotedOutboxReview: DemotedOutboxReview | null;
 }
 
 /**
@@ -185,15 +221,23 @@ export async function runSyncCycle(
     pull.lockSnapshot !== null && pull.lockSnapshot.activeDeviceId !== deviceId;
 
   if (isDemoted) {
+    const demotedOutboxReview = await reconcileAndReviewDemotedOutbox(
+      db,
+      businessId,
+      dek,
+      pull.failedEnvelopes,
+      pull.appliedEnvelopes,
+    );
     const remainingCount = await countPendingOutbox(db, businessId);
     return {
       pull,
       push: { pushedCount: 0, remainingCount, skippedDueToDemotion: true },
+      demotedOutboxReview,
     };
   }
 
   const push = await pushOutbox(db, transport, businessId);
-  return { push, pull };
+  return { push, pull, demotedOutboxReview: null };
 }
 
 export type { ActiveDeviceLockSnapshot, OutboxEnvelope, WireEnvelope, SyncTransport };

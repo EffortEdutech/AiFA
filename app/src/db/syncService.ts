@@ -23,20 +23,25 @@ import {
   getLastAppliedServerSeq,
   setCachedLock,
 } from "@aifa/core/sync/localState";
+import type { DemotedOutboxReview } from "@aifa/core/sync/reconciliation";
 import {
   createSupabaseDevicesTransport,
   createSupabaseSyncTransport,
   type ActiveDeviceInfo,
   type RegisteredDevice,
 } from "@aifa/core/sync/supabaseTransport";
-import { runSyncCycle, pullEnvelopes } from "@aifa/core/sync/syncClient";
+import {
+  runSyncCycle,
+  pullEnvelopes,
+  pushOutbox,
+} from "@aifa/core/sync/syncClient";
 import { setSyncContext } from "@aifa/core/sync/syncContext";
 
 import { getDb } from "./client";
 
 import { supabase } from "@/lib/supabaseClient";
 
-export type { RegisteredDevice, ActiveDeviceInfo };
+export type { RegisteredDevice, ActiveDeviceInfo, DemotedOutboxReview };
 
 /** Shared with web/src/lib/syncService.ts's own instance — same query/RPC shapes, different `supabase` client object underneath (@aifa/core/sync/supabaseTransport.ts). */
 export const supabaseSyncTransport = createSupabaseSyncTransport(supabase);
@@ -56,19 +61,52 @@ export function initMobileSync(
   setSyncContext({ businessId, deviceId, dek });
 }
 
-/** Runs one push+pull cycle against the real Supabase transport, using this device's real local database. */
+/**
+ * Runs one push+pull cycle against the real Supabase transport, using
+ * this device's real local database. Returns the Section 6a.4 review
+ * summary (Sprint 20) when this cycle discovered a demotion -- Section
+ * 7.2's conflict resolution has already run and mutated local state by
+ * the time this resolves (see reconciliation.ts); this return value is
+ * only what still needs the owner's eyes before sending, or null when
+ * there was nothing to reconcile (the ordinary, non-demoted case).
+ */
 export async function runMobileSyncCycle(
   businessId: string,
   deviceId: string,
   dek: Uint8Array,
-): Promise<void> {
+): Promise<DemotedOutboxReview | null> {
   const db: SqlDb = await getDb();
-  await runSyncCycle(db, supabaseSyncTransport, businessId, dek, deviceId);
+  const result = await runSyncCycle(
+    db,
+    supabaseSyncTransport,
+    businessId,
+    dek,
+    deviceId,
+  );
   // Sprint 17: piggyback the heartbeat on every sync cycle rather than a
   // separate timer -- a cycle already means this device is online and
   // active-ish, exactly the cadence touch_device_heartbeat's own doc
   // calls "genuinely active enough."
   await touchDeviceHeartbeat(businessId, deviceId);
+  return result.demotedOutboxReview;
+}
+
+/**
+ * Sprint 20 (Vol 12_1 Section 6a.4) — sends whatever remains in the
+ * outbox once the owner has reviewed the "N items captured before
+ * deactivation" list. Deliberately calls pushOutbox directly rather than
+ * runSyncCycle: by the time the owner is looking at a review screen,
+ * Section 7.2's conflict has already been resolved (the losing bundle
+ * already removed from the outbox), so everything left is safe to send
+ * exactly as any other queued write (Section 7.1/7.3) -- regardless of
+ * whether THIS device happens to be active again yet, which is exactly
+ * why runSyncCycle's own demotion guard must NOT gate this call.
+ */
+export async function sendReviewedDemotedOutbox(
+  businessId: string,
+): Promise<void> {
+  const db: SqlDb = await getDb();
+  await pushOutbox(db, supabaseSyncTransport, businessId);
 }
 
 export class ActivationRejectedError extends Error {}

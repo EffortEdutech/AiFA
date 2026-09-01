@@ -181,6 +181,23 @@ export async function reverseLedgerEntries(
  * IGNORE keyed on the envelope's own id is idempotent under replay the
  * same way every other insert-only entity's apply path is.
  */
+/**
+ * Sprint 20 — deletes the ledger entries posted against one BusinessData
+ * row. Used ONLY by sync/reconciliation.ts to remove a discarded losing
+ * correction's OWN new entries (never its reversal entries -- see that
+ * module's header comment on why the `{id}-REV` deterministic id already
+ * makes a losing device's reversal entries harmlessly idempotent with the
+ * winning device's own reversal, so there is nothing to clean up there).
+ */
+export async function deleteLedgerEntriesForBusinessData(
+  db: SqlDb,
+  businessDataId: string,
+): Promise<void> {
+  await db.execute(`DELETE FROM ledger_entries WHERE business_data_id = ?;`, [
+    businessDataId,
+  ]);
+}
+
 export async function applyPulledLedgerEntry(
   db: SqlDb,
   entry: LedgerEntry,
