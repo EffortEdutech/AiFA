@@ -26,7 +26,7 @@ import {
 import accountingRules from "../../../packages/core/pka/accounting_rules.json";
 
 import BYOKSettingsCard from "@/components/BYOKSettingsCard";
-import PrimaryDeviceSettingsCard from "@/components/PrimaryDeviceSettingsCard";
+import DevicesPanel from "@/components/DevicesPanel";
 import SyncSetupCard from "@/components/SyncSetupCard";
 import { getDb, getDeviceEncryptionKey, getLocalBusinessId } from "@/db/client";
 import { deleteRemoteAccountData } from "@/db/deletionService";
@@ -550,7 +550,7 @@ export default function SettingsScreen() {
             <Text style={styles.placeholderText}>
               Sync is enabled on this device.
             </Text>
-            <PrimaryDeviceSettingsCard businessId={session.user.id} />
+            <DevicesPanel businessId={session.user.id} />
           </View>
         ) : null)}
 

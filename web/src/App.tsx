@@ -13,25 +13,26 @@ import { Workspace } from "./components/Workspace";
 import { getDefaultWebProvider } from "./lib/aiProvider";
 import { useAuthSession } from "./lib/auth";
 import {
-  clearBusinessDekCryptoKey,
+  clearStoredRecoveryCode,
 } from "./lib/keyStore";
 import {
   restoreWebSyncIdentity,
   type WebSyncIdentity,
 } from "./lib/deviceBootstrap";
 import { LocalDataClearedError, openIndexedDbSqlAdapter, clearLocalDbFile } from "./lib/sqlJsAdapter";
+import { initWebSync } from "./lib/syncService";
+import { useWebSync } from "./hooks/useWebSync";
+import { ReadOnlyBanner } from "./components/ReadOnlyBanner";
 
 type Tab = "dashboard" | "capture" | "workspace" | "settings";
 
 /**
- * Sprint 18 root component. Layering, outside-in: auth (Supabase, same
- * backend as mobile) -> per-browser device/DEK setup (Vol 12_0 §6a) ->
- * the encrypted local SQL database (sql.js + IndexedDB, sqlJsAdapter.ts)
- * -> the Phase 2a feature slice itself. No SyncContext is set anywhere
- * here — sync is explicitly Sprint 19's job (this sprint's Objectives),
- * so every @aifa/core write below runs exactly as it would in any
- * pre-Sprint-16 test: ungated, unqueued (see syncContext.ts's own doc for
- * why that's the deliberately safe default with no context set).
+ * Root component. Layering, outside-in: auth (Supabase, same backend as
+ * mobile) -> per-browser device/DEK setup (Vol 12_0 §6a) -> the
+ * encrypted local SQL database (sql.js + IndexedDB, sqlJsAdapter.ts) ->
+ * sync (Sprint 19: initWebSync sets the ambient SyncContext once the
+ * identity+db are both ready, useWebSync.ts runs the actual cycles) ->
+ * the feature slice itself.
  */
 export default function App(): JSX.Element {
   const { session, isLoading: sessionLoading } = useAuthSession();
@@ -69,7 +70,7 @@ export default function App(): JSX.Element {
     if (!identity) return;
     let cancelled = false;
     setDataCleared(false);
-    openIndexedDbSqlAdapter(identity.dek)
+    openIndexedDbSqlAdapter(identity.dbKey)
       .then(async (adapter) => {
         await runMigrations(adapter);
         if (!cancelled) setDb(adapter);
@@ -87,8 +88,24 @@ export default function App(): JSX.Element {
     };
   }, [identity]);
 
+  // Step 3 (Sprint 19): once both the identity and the local db are
+  // ready, set the ambient SyncContext so every @aifa/core write from
+  // here on is gated and queued for sync -- mirrors mobile's
+  // syncBootstrap.ts calling initMobileSync at the equivalent point.
+  useEffect(() => {
+    if (!identity || !db) return;
+    initWebSync(identity.businessId, identity.deviceId, identity.dek);
+  }, [identity, db]);
+
+  const { activeDeviceInfo, refreshActiveDeviceInfo } = useWebSync(
+    db,
+    identity?.businessId ?? null,
+    identity?.deviceId ?? null,
+    identity?.dek ?? null,
+  );
+
   async function handleDataClearedRetry(): Promise<void> {
-    await Promise.all([clearBusinessDekCryptoKey(), clearLocalDbFile()]);
+    await Promise.all([clearStoredRecoveryCode(), clearLocalDbFile()]);
     setDataCleared(false);
     setIdentity(null);
     setIdentityChecked(false);
@@ -123,6 +140,16 @@ export default function App(): JSX.Element {
 
   return (
     <div style={{ maxWidth: 760, margin: "0 auto", padding: 24 }}>
+      {identity && activeDeviceInfo && (
+        <ReadOnlyBanner
+          db={db}
+          businessId={identity.businessId}
+          deviceId={identity.deviceId}
+          dek={identity.dek}
+          info={activeDeviceInfo}
+          onActivated={refreshActiveDeviceInfo}
+        />
+      )}
       <h1 style={{ fontSize: 22 }}>AiFA</h1>
       <div className="tabs" role="tablist">
         {(["dashboard", "capture", "workspace", "settings"] as Tab[]).map((t) => (
@@ -152,7 +179,7 @@ export default function App(): JSX.Element {
         <Workspace db={db} provider={provider} businessId={businessId} />
       )}
       {tab === "settings" && (
-        <SettingsReadOnly db={db} businessId={businessId} deviceId={identity.deviceId} />
+        <SettingsReadOnly db={db} businessId={businessId} deviceId={identity.deviceId} dek={identity.dek} />
       )}
     </div>
   );

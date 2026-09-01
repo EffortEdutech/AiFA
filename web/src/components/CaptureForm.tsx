@@ -10,8 +10,17 @@ import {
   type InterpretationOutcome,
 } from "@aifa/core/ai/capturePipeline";
 import type { AiProvider } from "@aifa/core/ai/types";
+import { WriteGateError } from "@aifa/core/sync/writeGate";
 
 type Domain = "expense" | "sale" | "purchase" | "banking";
+
+/** Sprint 19 -- WriteGateError (@aifa/core/sync/writeGate) is what a genuinely-blocked write throws once SyncContext is set (App.tsx's initWebSync) and this browser isn't the active device. Surfaced as a friendly message here instead of the generic "Capture failed." fallback -- the ReadOnlyBanner above already explains AND offers the fix (make this device active), so this message stays short and points back to it rather than repeating that UI. */
+function describeWriteError(err: unknown): string {
+  if (err instanceof WriteGateError) {
+    return "This device is read-only right now -- use the banner above to make it active before recording.";
+  }
+  return err instanceof Error ? err.message : "Capture failed.";
+}
 
 interface Props {
   db: SqlDb;
@@ -79,7 +88,7 @@ export function CaptureForm({ db, provider, businessId, onCaptured }: Props): JS
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Capture failed.");
+      setError(describeWriteError(err));
     } finally {
       setBusy(false);
     }
@@ -103,7 +112,13 @@ export function CaptureForm({ db, provider, businessId, onCaptured }: Props): JS
       setChosenCategory("");
       onCaptured();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not confirm category.");
+      setError(
+        err instanceof WriteGateError
+          ? "This device is read-only right now -- use the banner above to make it active before confirming."
+          : err instanceof Error
+            ? err.message
+            : "Could not confirm category.",
+      );
     } finally {
       setBusy(false);
     }

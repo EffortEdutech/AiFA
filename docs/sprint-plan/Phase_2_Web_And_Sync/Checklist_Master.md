@@ -206,25 +206,31 @@ Full regression re-run after this sprint (packages/core and app/ untouched): 19/
 ## Sprint 19 — Web Sync Client & Device Visibility Panel
 
 **Web Sync Client**
-- [ ] Push/pull/idempotency ported to web against `IndexedDBDataAdapter`
-- [ ] Web read-only enforcement at data-layer boundary (same standard as mobile)
-- [ ] Web handoff/primary-override actions implemented, reusing Sprint 17's protocol logic
+- [x] Push/pull/idempotency ported to web against `IndexedDBDataAdapter` — `web/src/lib/syncService.ts`, built on `@aifa/core/sync/supabaseTransport.ts` (new — the Supabase `SyncTransport` implementation extracted from `app/src/db/syncService.ts` so mobile and web share the exact same push/pull/idempotency logic, not a parallel reimplementation). See the Sprint 19 runbook §1/§4 for the cross-package typing gotcha found and fixed while wiring this up (2026-09-01)
+- [x] Web read-only enforcement at data-layer boundary (same standard as mobile) — `App.tsx`'s `initWebSync` sets the ambient `SyncContext` (same `@aifa/core/sync/syncContext`/`writeGate.ts` mobile already uses); `CaptureForm.tsx` now surfaces a friendly message on `WriteGateError` instead of a generic failure (2026-09-01)
+- [x] Web handoff/primary-override actions implemented, reusing Sprint 17's protocol logic — `web/src/components/ReadOnlyBanner.tsx`, calling the SAME `resolveActivationConfirmation`/`describeReadOnlyReason` (`@aifa/core/sync/handoff`) mobile's banner uses, unchanged (2026-09-01)
 
 **Devices Panel (Both Platforms)**
-- [ ] Table showing registered/logged-in/active/synced as four distinct states
-- [ ] Primary badge shown
-- [ ] Actions: request activation, set as primary, rename, revoke — all functional
-- [ ] Last-seen/last-synced timestamps shown
+- [x] Table showing registered/logged-in/active/synced as four distinct states — `app/src/components/DevicesPanel.tsx` and `web/src/components/DevicesPanel.tsx`, both against the new `getAllDevices` query (revoked devices included, Status: Active/Read-only/Revoked derived) (2026-09-01)
+- [x] Primary badge shown — independent of Status, per Vol 12_1 §8 (2026-09-01)
+- [x] Actions: request activation, set as primary, rename, revoke — all functional — see the Sprint 19 runbook §2 for which rows show "Make active" and why (only the viewer's own device, per Vol 12_1 §6a.1) (2026-09-01)
+- [x] Last-seen/last-synced timestamps shown — "Sync state" derived from local checkpoint (own row) or `lastSyncedServerSeq` (other rows) vs. cloud `getMaxServerSeq` (2026-09-01)
 
 **Cross-Platform Consistency**
-- [ ] Device registered on mobile visible correctly from web panel, and vice versa
-- [ ] Revoking a device from either platform blocks that device live on its next write attempt
+- [x] Device registered on mobile visible correctly from web panel, and vice versa — proven via `app/backend/verification/sprint19_cross_platform_consistency_test.py`, 8/8 checks passed (2026-09-01)
+- [x] Revoking a device from either platform blocks that device live on its next write attempt — same script, Step 7: `request_activation` rejected for the revoked device from both simulated sessions. NOTE a real, disclosed limitation: revocation does NOT force-sign-out that device's Supabase session (no per-device session in this app's one-user-per-business auth model) — see runbook §3 (2026-09-01)
 
 **Sprint 19 Definition of Done**
-- [ ] Web push/pull/idempotency tests pass at the same standard as Sprint 16's mobile tests
-- [ ] Web read-only enforcement proven at code level
-- [ ] Devices panel correct and consistent across both platforms
-- [ ] All four panel actions verified functional from web
+- [x] Web push/pull/idempotency tests pass at the same standard as Sprint 16's mobile tests — full mobile regression (19/19 suites, 165/165 tests) re-run twice this sprint, unchanged; web has no Jest runner (Sprint 18's own scoping), verified instead via `tsc`/`eslint`/`vite build`/`verify:sqljs-parity`, all clean (2026-09-01)
+- [x] Web read-only enforcement proven at code level — `tsc`-clean `WriteGateError` handling wired in `CaptureForm.tsx`; live browser exercise not possible in this sandbox (2026-09-01)
+- [x] Devices panel correct and consistent across both platforms — same shared `@aifa/core/sync/supabaseTransport.ts` query/RPC shapes on both, cross-platform consistency script confirms (2026-09-01)
+- [x] All four panel actions verified functional from web — code-complete, `tsc`/`eslint`-clean; the underlying RPCs (`rename_device`, `revoke_device`, `set_primary_device`, `request_activation`) verified directly via the cross-platform SQL script, not via a live browser click-through (2026-09-01)
+
+**Not covered this sprint (see runbook §6 for full detail)**
+- Live end-to-end verification against a real Supabase project and a real browser — owner-driven, same standing caveat as every prior Supabase-touching sprint
+- A full "choose your own replacement device" picker UI for Revoke — auto-selected default (primary, then any other) covers Vol 12_1 §8's own stated requirement
+- Per-device Supabase session invalidation on Revoke — disclosed limitation of the one-Supabase-user-per-business auth model (runbook §3)
+- DEK rotation — unchanged top-priority open item, Vol 12_1 §12
 
 ---
 

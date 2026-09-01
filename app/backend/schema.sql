@@ -496,3 +496,195 @@ end;
 $$;
 
 grant execute on function public.touch_device_heartbeat(text, bigint) to authenticated;
+
+-- ============================================================
+-- rename_device: Sprint 19 (Vol 12_1 Section 8, "Rename" action).
+-- No CAS/concurrency concern here (a label is not a safety-critical
+-- field the way the active lock or primary flag are) -- a plain
+-- SECURITY DEFINER update scoped to the caller's own business, same
+-- auth.uid() pattern every other RPC in this file uses.
+-- ============================================================
+create or replace function public.rename_device(
+  p_device_id text,
+  p_new_device_label text
+) returns public.devices
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_business_id uuid := auth.uid();
+  v_row public.devices;
+begin
+  if v_business_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if p_new_device_label is null or btrim(p_new_device_label) = '' then
+    raise exception 'device_label_required';
+  end if;
+
+  update public.devices
+  set device_label = p_new_device_label
+  where device_id = p_device_id
+    and business_id = v_business_id
+    and revoked_at is null
+  returning * into v_row;
+
+  if not found then
+    raise exception 'device_not_registered_or_revoked';
+  end if;
+
+  return v_row;
+end;
+$$;
+
+grant execute on function public.rename_device(text, text) to authenticated;
+
+-- ============================================================
+-- revoke_device: Sprint 19 (Vol 12_1 Section 8, "Revoke" action).
+-- Sprint 15 built the `revoked_at` column and every other RPC's
+-- `revoked_at is null` guard, but stubbed the actual revocation flow
+-- itself as backend-only/not-yet-built -- this is that RPC.
+--
+-- Vol 12_1 Section 8 describes three things a revoke must do: (1) set
+-- revoked_at, (2) force-sign-out that device's Supabase session, (3) if
+-- the revoked device was active, require the owner to immediately
+-- activate a replacement (defaulting to the primary device if it
+-- exists and isn't the one being revoked).
+--
+-- (2) is NOT implemented here, and is a real, disclosed gap rather than
+-- a silent omission -- see the Sprint 19 runbook Section on revocation
+-- for the full reasoning. Short version: this app's auth model is one
+-- Supabase user (auth.uid()) per BUSINESS, shared identically across
+-- every device that business has ever registered -- there is no
+-- per-device Supabase session to selectively invalidate without a new
+-- layer of session-to-device tracking this schema does not have.
+-- Deleting rows from Supabase's own internal auth.sessions/
+-- auth.refresh_tokens tables from inside a SECURITY DEFINER function
+-- was considered and rejected: those are undocumented internals of a
+-- vendor-managed schema, not a stable contract this project should
+-- depend on (the same reasoning that has kept this codebase away from
+-- other undocumented-internals dependencies throughout). What this RPC
+-- DOES guarantee, immediately and unconditionally, the same way every
+-- other RPC in this file does: a revoked device_id can never again pass
+-- the `revoked_at is null` check in request_activation,
+-- request_primary_takeover, set_primary_device, or
+-- touch_device_heartbeat -- so it can never become or remain the writer,
+-- full stop, regardless of what its still-valid Supabase session can
+-- still technically call. Full decrypt-level revocation still needs DEK
+-- rotation, same top-priority open item Vol 12_1 Section 12 already
+-- names for a related reason.
+--
+-- (3) IS implemented: if the device being revoked currently holds the
+-- active lock, the caller MUST pass p_new_active_device_id (a caller
+-- that omits it gets a clear must_designate_replacement_active_device
+-- error, not a silently-orphaned lock) -- reassignment here is a direct,
+-- unconditional grant (no CAS, no sync-precondition check) since this
+-- is an owner-driven administrative action, not a live handoff race
+-- between two normally-operating devices, and leaving the business with
+-- an active lock pointing at a now-revoked device would be worse than a
+-- slightly less ceremonious reassignment. If the revoked device is also
+-- currently primary, the caller MUST similarly pass
+-- p_new_primary_device_id (must_designate_new_primary_device) -- Section
+-- 8's text does not explicitly say what happens to primary status on
+-- revocation, so this RPC takes the more conservative reading: never
+-- silently leave a business with zero primary device, require an
+-- explicit decision same as the active-lock case.
+-- ============================================================
+create or replace function public.revoke_device(
+  p_device_id text,
+  p_new_active_device_id text default null,
+  p_new_primary_device_id text default null
+) returns public.devices
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_business_id uuid := auth.uid();
+  v_was_active boolean;
+  v_was_primary boolean;
+  v_new_lock_token uuid;
+  v_row public.devices;
+begin
+  if v_business_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext(v_business_id::text));
+
+  if not exists (
+    select 1 from public.devices
+    where device_id = p_device_id and business_id = v_business_id and revoked_at is null
+  ) then
+    raise exception 'device_not_registered_or_revoked';
+  end if;
+
+  select
+    exists (
+      select 1 from public.active_device_lock
+      where business_id = v_business_id and active_device_id = p_device_id
+    ),
+    is_primary
+  into v_was_active, v_was_primary
+  from public.devices
+  where device_id = p_device_id and business_id = v_business_id;
+
+  if v_was_active and p_new_active_device_id is null then
+    raise exception 'must_designate_replacement_active_device';
+  end if;
+
+  if v_was_primary and p_new_primary_device_id is null then
+    raise exception 'must_designate_new_primary_device';
+  end if;
+
+  if p_new_active_device_id is not null and not exists (
+    select 1 from public.devices
+    where device_id = p_new_active_device_id
+      and business_id = v_business_id
+      and revoked_at is null
+      and device_id <> p_device_id
+  ) then
+    raise exception 'replacement_active_device_not_registered_or_revoked';
+  end if;
+
+  if p_new_primary_device_id is not null and not exists (
+    select 1 from public.devices
+    where device_id = p_new_primary_device_id
+      and business_id = v_business_id
+      and revoked_at is null
+      and device_id <> p_device_id
+  ) then
+    raise exception 'replacement_primary_device_not_registered_or_revoked';
+  end if;
+
+  update public.devices
+  set revoked_at = now()
+  where device_id = p_device_id and business_id = v_business_id
+  returning * into v_row;
+
+  if p_new_active_device_id is not null then
+    v_new_lock_token := gen_random_uuid();
+    update public.active_device_lock
+    set active_device_id = p_new_active_device_id,
+        lock_token = v_new_lock_token,
+        acquired_at = now()
+    where business_id = v_business_id;
+  end if;
+
+  if p_new_primary_device_id is not null then
+    update public.devices
+    set is_primary = false
+    where business_id = v_business_id and is_primary = true;
+
+    update public.devices
+    set is_primary = true
+    where device_id = p_new_primary_device_id and business_id = v_business_id;
+  end if;
+
+  return v_row;
+end;
+$$;
+
+grant execute on function public.revoke_device(text, text, text) to authenticated;

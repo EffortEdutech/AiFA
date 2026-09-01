@@ -166,7 +166,7 @@ export async function openIndexedDbSqlAdapter(dek: CryptoKey): Promise<SqlDb> {
   };
 }
 
-/** Wipes the locally-stored encrypted database file (not the CryptoKey) — used when the owner explicitly resets local web data, distinct from clearBusinessDekCryptoKey in keyStore.ts. */
+/** Wipes the locally-stored encrypted database file (not the CryptoKey) — used when the owner explicitly resets local web data, distinct from clearStoredRecoveryCode in keyStore.ts. */
 export async function clearLocalDbFile(): Promise<void> {
   const db = await openDbFileStore();
   await new Promise<void>((resolve, reject) => {
