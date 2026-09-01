@@ -25,6 +25,9 @@ describe("migrations", () => {
         "business_knowledge_entries",
         "app_settings",
         "app_error_log",
+        "sync_outbox",
+        "sync_local_state",
+        "sync_lock_cache",
       ]),
     );
   });
@@ -37,7 +40,7 @@ describe("migrations", () => {
       `SELECT version FROM schema_migrations;`,
     );
     expect(applied.map((r) => r.version).sort((a, b) => a - b)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
     ]);
   });
 

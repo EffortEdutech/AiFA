@@ -54,7 +54,12 @@
     ],
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/src/$1",
-      "^@aifa/core/(.*)$": "<rootDir>/../packages/core/src/$1"
+      "^@aifa/core/(.*)$": "<rootDir>/../packages/core/src/$1",
+      "^@noble/ciphers/aes\\.js$": "<rootDir>/node_modules/@noble/ciphers/aes.js",
+      "^@noble/ciphers/utils\\.js$": "<rootDir>/node_modules/@noble/ciphers/utils.js",
+      "^@noble/hashes/hkdf\\.js$": "<rootDir>/node_modules/@noble/hashes/hkdf.js",
+      "^@noble/hashes/sha2\\.js$": "<rootDir>/node_modules/@noble/hashes/sha2.js",
+      "^@noble/hashes/utils\\.js$": "<rootDir>/node_modules/@noble/hashes/utils.js"
     },
     "transform": {
       "^.+\\.tsx?$": "ts-jest",
