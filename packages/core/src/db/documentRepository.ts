@@ -5,6 +5,7 @@
  * migrations.ts for why); `documents` is the linked metadata row.
  */
 import type { SqlDb } from "./types";
+import { assertSyncGateOk, enqueueSyncableWrite } from "../sync/syncHooks";
 
 export type DocumentType = "receipt" | "invoice" | "statement" | "other";
 export type ExtractionStatus =
@@ -50,19 +51,26 @@ export async function saveDocument(
   db: SqlDb,
   input: SaveDocumentInput,
 ): Promise<{ document: DocumentRecord; blob: DocumentBlob }> {
+  await assertSyncGateOk(db);
   const now = new Date().toISOString();
   const docId = documentId(input.businessEventId);
   const blobId = `${docId}-BLOB`;
   const byteSize = Math.ceil((input.base64Data.length * 3) / 4); // approx decoded size
 
+  // Sprint 16: switched to OR IGNORE (was a plain INSERT) so this
+  // function is safe to call twice with the same deterministic
+  // (businessEventId-derived) id -- required for pulled-envelope replay
+  // idempotency (Vol 12_1 Section 6.3); harmless for the pre-existing
+  // local-capture call path, which never legitimately calls this twice
+  // for the same event.
   await db.execute(
-    `INSERT INTO document_blobs (id, mime_type, base64_data, byte_size, created_at)
+    `INSERT OR IGNORE INTO document_blobs (id, mime_type, base64_data, byte_size, created_at)
      VALUES (?, ?, ?, ?, ?);`,
     [blobId, input.mimeType, input.base64Data, byteSize, now],
   );
 
   await db.execute(
-    `INSERT INTO documents (id, business_event_id, file_ref, type, extraction_status, created_at)
+    `INSERT OR IGNORE INTO documents (id, business_event_id, file_ref, type, extraction_status, created_at)
      VALUES (?, ?, ?, ?, ?, ?);`,
     [
       docId,
@@ -74,23 +82,23 @@ export async function saveDocument(
     ],
   );
 
-  return {
-    document: {
-      id: docId,
-      business_event_id: input.businessEventId,
-      file_ref: blobId,
-      type: input.type,
-      extraction_status: input.extractionStatus,
-      created_at: now,
-    },
-    blob: {
-      id: blobId,
-      mime_type: input.mimeType,
-      base64_data: input.base64Data,
-      byte_size: byteSize,
-      created_at: now,
-    },
+  const document: DocumentRecord = {
+    id: docId,
+    business_event_id: input.businessEventId,
+    file_ref: blobId,
+    type: input.type,
+    extraction_status: input.extractionStatus,
+    created_at: now,
   };
+  const blob: DocumentBlob = {
+    id: blobId,
+    mime_type: input.mimeType,
+    base64_data: input.base64Data,
+    byte_size: byteSize,
+    created_at: now,
+  };
+  await enqueueSyncableWrite(db, "document", "insert", { document, blob });
+  return { document, blob };
 }
 
 export async function updateExtractionStatus(

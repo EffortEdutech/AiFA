@@ -339,6 +339,79 @@ export const migrations: Migration[] = [
     name: "app_settings_last_backup_at",
     statements: [`ALTER TABLE app_settings ADD COLUMN last_backup_at TEXT;`],
   },
+  {
+    // Sprint 16 -- Mobile Sync Client & Read-Only Enforcement (Vol 12_1
+    // Section 3 Sync Envelope, Section 6 Sync Flow, Section 6a.3 write
+    // gate). Purely local bookkeeping tables -- none of this is synced
+    // itself, it is the machinery that drives syncing everything else.
+    //
+    // sync_outbox: local queue of envelopes captured on this device,
+    // waiting to be pushed (Section 6.1). A row's presence means "not yet
+    // acknowledged by the server"; the row is deleted once push succeeds
+    // (Section 6.1: "Device marks the outbox row synced and removes it").
+    // payload_ciphertext/payload_iv are stored as base64 TEXT rather than
+    // BLOB so the same column shape works identically across every SqlDb
+    // adapter this project uses (op-sqlite in production, node:sqlite in
+    // tests) without relying on either one's binary-parameter binding
+    // behaviour being identical.
+    //
+    // sync_local_state: one row per business, this device's own sync
+    // bookkeeping -- device_id (stable per install), next_device_seq (the
+    // monotonic local counter Section 3's envelope_id needs -- kept here,
+    // not derived from MAX(device_seq) in sync_outbox, because outbox rows
+    // are deleted after push and would make the counter regress), and
+    // last_applied_server_seq (this device's pull checkpoint, Section
+    // 6.2).
+    //
+    // sync_lock_cache: this device's last-known copy of
+    // public.active_device_lock (Section 5a), refreshed on every pull
+    // cycle (Section 6.2's "On receipt of an active_device_lock change").
+    // This is what the write gate (sync/writeGate.ts) checks against --
+    // Section 6a.3 requires the check to be live/re-checked, not a
+    // one-time flag, but it does not require a network round-trip on
+    // every keystroke either; re-checking against a cache that is itself
+    // kept current by the ordinary pull cycle satisfies both.
+    version: 11,
+    name: "sync_outbox_and_local_sync_state",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS sync_outbox (
+         envelope_id TEXT PRIMARY KEY,
+         business_id TEXT NOT NULL,
+         device_id TEXT NOT NULL,
+         device_seq INTEGER NOT NULL,
+         entity_type TEXT NOT NULL CHECK (entity_type IN (
+           'business_event','business_data','ledger_entry','document',
+           'ai_interpretation','business_event_status_transition',
+           'business_knowledge_entry','app_settings'
+         )),
+         op TEXT NOT NULL CHECK (op IN ('insert','status_transition','upsert')),
+         payload_ciphertext TEXT NOT NULL,
+         payload_iv TEXT NOT NULL,
+         created_at TEXT NOT NULL,
+         -- Section 6a.4's offline-demoted-device backstop needs to tell
+         -- the owner "captured before this device was deactivated" --
+         -- recorded at enqueue time (the active device this write
+         -- believed it was), not derived later, since by the time the
+         -- device discovers it was demoted the honest answer is only
+         -- knowable from what was true when the write happened.
+         written_as_active_device_id TEXT
+       );`,
+      `CREATE INDEX IF NOT EXISTS idx_sync_outbox_business ON sync_outbox(business_id, device_seq);`,
+      `CREATE TABLE IF NOT EXISTS sync_local_state (
+         business_id TEXT PRIMARY KEY,
+         device_id TEXT NOT NULL,
+         next_device_seq INTEGER NOT NULL DEFAULT 1,
+         last_applied_server_seq INTEGER NOT NULL DEFAULT 0
+       );`,
+      `CREATE TABLE IF NOT EXISTS sync_lock_cache (
+         business_id TEXT PRIMARY KEY,
+         active_device_id TEXT NOT NULL,
+         lock_token TEXT NOT NULL,
+         acquired_at TEXT NOT NULL,
+         cached_at TEXT NOT NULL
+       );`,
+    ],
+  },
 ];
 
 /**

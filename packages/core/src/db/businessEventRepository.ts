@@ -19,6 +19,7 @@
  * Sprint 7 (Vol 0_1 §4).
  */
 import type { SqlDb } from "./types";
+import { assertSyncGateOk, enqueueSyncableWrite } from "../sync/syncHooks";
 
 export type CaptureMode = "voice" | "text" | "photo" | "document" | "manual";
 export type BusinessEventStatus =
@@ -109,6 +110,10 @@ async function insertEventAndData(
     status: BusinessEventStatus;
   },
 ): Promise<{ event: BusinessEvent; data: BusinessData }> {
+  // Sprint 16 (Vol 12_1 Section 6a.3): checked BEFORE any db.execute below
+  // -- a rejected write must never touch the database at all, not be
+  // written and then regretted.
+  await assertSyncGateOk(db);
   const now = new Date();
   const nowIso = now.toISOString();
   const eventId = await generateBusinessEventId(db, now);
@@ -148,6 +153,33 @@ async function insertEventAndData(
       nowIso,
     ],
   );
+
+  // Sprint 16 (Vol 12_1 Section 6.1) -- gated at the boundary every write
+  // already passes through, not in the caller. No-op when this device has
+  // no sync context set (syncHooks.ts).
+  await enqueueSyncableWrite(db, "business_event", "insert", {
+    id: eventId,
+    business_id: params.businessId,
+    captured_at: nowIso,
+    capture_mode: "text",
+    raw_input_ref: params.description,
+    status: params.status,
+    superseded_by: null,
+    domain_hint: params.domainHint,
+  });
+  await enqueueSyncableWrite(db, "business_data", "insert", {
+    id: dataId,
+    business_event_id: eventId,
+    type: params.dataType,
+    counterparty_name: params.counterpartyName ?? null,
+    amount: params.amount,
+    currency: params.currency,
+    payment_method: params.paymentMethod,
+    category_guess: null,
+    confidence: null,
+    document_refs: "[]",
+    created_at: nowIso,
+  });
 
   return {
     event: {
@@ -217,6 +249,7 @@ export async function createQueuedPhotoEvent(
   db: SqlDb,
   input: QueuedPhotoEventInput,
 ): Promise<BusinessEvent> {
+  await assertSyncGateOk(db);
   const now = new Date();
   const nowIso = now.toISOString();
   const eventId = await generateBusinessEventId(db, now);
@@ -237,7 +270,7 @@ export async function createQueuedPhotoEvent(
     ],
   );
 
-  return {
+  const event: BusinessEvent = {
     id: eventId,
     business_id: input.businessId,
     captured_at: nowIso,
@@ -247,6 +280,8 @@ export async function createQueuedPhotoEvent(
     superseded_by: null,
     domain_hint: "expense",
   };
+  await enqueueSyncableWrite(db, "business_event", "insert", event);
+  return event;
 }
 
 export interface AttachExpenseDataInput {
@@ -271,6 +306,7 @@ export async function attachExpenseBusinessData(
   db: SqlDb,
   input: AttachExpenseDataInput,
 ): Promise<BusinessData> {
+  await assertSyncGateOk(db);
   const nowIso = new Date().toISOString();
   const dataId = `BD-${input.eventId.slice(3)}`;
 
@@ -298,7 +334,7 @@ export async function attachExpenseBusinessData(
     ],
   );
 
-  return {
+  const data: BusinessData = {
     id: dataId,
     business_event_id: input.eventId,
     type: "expense",
@@ -311,6 +347,15 @@ export async function attachExpenseBusinessData(
     document_refs: "[]",
     created_at: nowIso,
   };
+  // Sprint 16: the raw_input_ref backfill above (business_events UPDATE)
+  // is deliberately NOT separately synced -- Vol 12_1 Section 3's op enum
+  // has no "update" variant for business_event, only insert/
+  // status_transition; a second "insert" would be silently ignored
+  // remotely (insert never overwrites, by design). This is a documented,
+  // narrow gap specific to the Sprint 5 photo-capture two-phase write,
+  // not a general sync limitation -- see the Sprint 16 runbook.
+  await enqueueSyncableWrite(db, "business_data", "insert", data);
+  return data;
 }
 
 /**
@@ -353,10 +398,20 @@ export async function setBusinessEventStatus(
   eventId: string,
   status: BusinessEventStatus,
 ): Promise<void> {
+  await assertSyncGateOk(db);
   await db.execute(`UPDATE business_events SET status = ? WHERE id = ?;`, [
     status,
     eventId,
   ]);
+  // Naturally idempotent (re-setting the same status is a no-op UPDATE),
+  // so this can be reused as-is for both the local write path and pulled
+  // status_transition envelope application (sync/applyEnvelope.ts).
+  await enqueueSyncableWrite(
+    db,
+    "business_event_status_transition",
+    "status_transition",
+    { eventId, status },
+  );
 }
 
 /**
@@ -391,9 +446,21 @@ export async function setSupersededBy(
   originalEventId: string,
   correctingEventId: string,
 ): Promise<void> {
+  await assertSyncGateOk(db);
   await db.execute(
     `UPDATE business_events SET superseded_by = ? WHERE id = ?;`,
     [correctingEventId, originalEventId],
+  );
+  // The migration-4 trigger permits exactly one NULL->value transition,
+  // so a replayed envelope for the same (originalEventId,
+  // correctingEventId) pair is a safe no-op UPDATE (identical values);
+  // a genuinely conflicting second supersede is rejected by the trigger,
+  // not by this function -- see applyEnvelope.ts for how that surfaces.
+  await enqueueSyncableWrite(
+    db,
+    "business_event_status_transition",
+    "status_transition",
+    { originalEventId, correctingEventId },
   );
 }
 
@@ -544,4 +611,60 @@ export async function getActivityItemByEventId(
       }
   >(`${ACTIVITY_SELECT} WHERE be.id = ? LIMIT 1;`, [eventId]);
   return rows[0] ? rowToActivityItem(rows[0]) : null;
+}
+
+/**
+ * Sprint 16 — applies a pulled `business_event` insert envelope (Vol 12_1
+ * Section 6.2/6.3). Unlike insertEventAndData, the id here was already
+ * assigned by the originating device (it travelled inside the envelope),
+ * so this cannot go through generateBusinessEventId; INSERT OR IGNORE
+ * makes re-delivery of the same envelope a safe no-op, satisfying Section
+ * 6.3's idempotency requirement on the pull side the same way
+ * ledgerRepository's deterministic ids already do on tables that mint
+ * their own id.
+ */
+export async function applyPulledBusinessEvent(
+  db: SqlDb,
+  event: BusinessEvent,
+): Promise<void> {
+  await db.execute(
+    `INSERT OR IGNORE INTO business_events
+       (id, business_id, captured_at, capture_mode, raw_input_ref, status, superseded_by, domain_hint)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      event.id,
+      event.business_id,
+      event.captured_at,
+      event.capture_mode,
+      event.raw_input_ref,
+      event.status,
+      event.superseded_by,
+      event.domain_hint,
+    ],
+  );
+}
+
+/** Sprint 16 — applies a pulled `business_data` insert envelope. Same idempotency reasoning as applyPulledBusinessEvent. */
+export async function applyPulledBusinessData(
+  db: SqlDb,
+  data: BusinessData,
+): Promise<void> {
+  await db.execute(
+    `INSERT OR IGNORE INTO business_data
+       (id, business_event_id, type, counterparty_name, amount, currency, payment_method, category_guess, confidence, document_refs, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      data.id,
+      data.business_event_id,
+      data.type,
+      data.counterparty_name,
+      data.amount,
+      data.currency,
+      data.payment_method,
+      data.category_guess,
+      data.confidence,
+      data.document_refs,
+      data.created_at,
+    ],
+  );
 }

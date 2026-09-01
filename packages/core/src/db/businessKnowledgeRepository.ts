@@ -22,6 +22,7 @@
  * trust" risk the Sprint 8 risk register calls out.
  */
 import type { SqlDb } from "./types";
+import { assertSyncGateOk, enqueueSyncableWrite } from "../sync/syncHooks";
 
 export type BusinessKnowledgePatternType =
   "vendor_category_mapping" | "customer_payment_behaviour" | "other";
@@ -83,6 +84,7 @@ export async function recordVendorCategoryConfirmation(
   category: string,
   now: Date = new Date(),
 ): Promise<BusinessKnowledgeEntry> {
+  await assertSyncGateOk(db);
   const id = knowledgeEntryId(businessId, "vendor_category_mapping", vendorKey);
   const nowIso = now.toISOString();
 
@@ -98,7 +100,7 @@ export async function recordVendorCategoryConfirmation(
        VALUES (?, ?, 'vendor_category_mapping', ?, ?, 1, ?);`,
       [id, businessId, vendorKey, category, nowIso],
     );
-    return {
+    const created: BusinessKnowledgeEntry = {
       id,
       business_id: businessId,
       pattern_type: "vendor_category_mapping",
@@ -107,6 +109,8 @@ export async function recordVendorCategoryConfirmation(
       confirmation_count: 1,
       confirmed_at: nowIso,
     };
+    await enqueueSyncableWrite(db, "business_knowledge_entry", "upsert", created);
+    return created;
   }
 
   const current = existing[0];
@@ -120,13 +124,52 @@ export async function recordVendorCategoryConfirmation(
     [category, nextCount, nowIso, id],
   );
 
-  return {
+  const updated: BusinessKnowledgeEntry = {
     ...current,
     value: category,
     confirmation_count: nextCount,
     confirmed_at: nowIso,
   };
+  await enqueueSyncableWrite(db, "business_knowledge_entry", "upsert", updated);
+  return updated;
 }
+
+/**
+ * Sprint 16 — applies a pulled `business_knowledge_entry` upsert envelope
+ * (Vol 12_1 Section 7.3: "last-confirmed-write-wins keyed by server_seq").
+ * Deliberately NOT recordVendorCategoryConfirmation: that function derives
+ * confirmation_count from whatever row is CURRENTLY local, which is the
+ * wrong basis for applying a remote change — the envelope already carries
+ * the fully-resolved count as computed on the originating device at
+ * capture time. This just writes the given row as-is; applying pulled
+ * envelopes in ascending server_seq order (sync/syncClient.ts) is what
+ * makes repeated application of this function equivalent to "last write
+ * wins."
+ */
+export async function applyPulledBusinessKnowledgeEntry(
+  db: SqlDb,
+  entry: BusinessKnowledgeEntry,
+): Promise<void> {
+  await db.execute(
+    `INSERT INTO business_knowledge_entries
+       (id, business_id, pattern_type, key, value, confirmation_count, confirmed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       value = excluded.value,
+       confirmation_count = excluded.confirmation_count,
+       confirmed_at = excluded.confirmed_at;`,
+    [
+      entry.id,
+      entry.business_id,
+      entry.pattern_type,
+      entry.key,
+      entry.value,
+      entry.confirmation_count,
+      entry.confirmed_at,
+    ],
+  );
+}
+
 
 /**
  * Looks up the trusted vendor -> category mapping for this vendor, if any.

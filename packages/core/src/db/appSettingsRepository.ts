@@ -19,6 +19,7 @@
  * boundary only -- callers never see a 0/1 literal.
  */
 import type { SqlDb } from "./types";
+import { assertSyncGateOk, enqueueSyncableWrite } from "../sync/syncHooks";
 
 export interface AppSettings {
   business_id: string;
@@ -100,7 +101,18 @@ export async function getAppSettings(
   return rowToSettings(rows[0]);
 }
 
-async function writeSettings(db: SqlDb, settings: AppSettings): Promise<void> {
+/**
+ * Sprint 16 — exported (was module-private) so sync/applyEnvelope.ts can
+ * apply a pulled `app_settings` upsert envelope as a raw last-write-wins
+ * snapshot, per Vol 12_1 Section 7.3, without going through
+ * updateBusinessProfile/updateNotificationPreferences (both of which
+ * merge against whatever is CURRENTLY local — the wrong basis for
+ * applying a remote change, same reasoning as
+ * businessKnowledgeRepository.ts's applyPulledBusinessKnowledgeEntry).
+ * ON CONFLICT DO UPDATE below already makes this naturally idempotent
+ * under envelope replay.
+ */
+export async function writeSettings(db: SqlDb, settings: AppSettings): Promise<void> {
   await db.execute(
     `INSERT INTO app_settings
        (business_id, business_name, industry, quiet_hours_enabled,
@@ -144,6 +156,7 @@ export async function updateBusinessProfile(
   update: BusinessProfileUpdate,
   now: Date = new Date(),
 ): Promise<AppSettings> {
+  await assertSyncGateOk(db);
   const current = await getAppSettings(db, businessId);
   const merged: AppSettings = {
     ...current,
@@ -157,6 +170,7 @@ export async function updateBusinessProfile(
     updated_at: now.toISOString(),
   };
   await writeSettings(db, merged);
+  await enqueueSyncableWrite(db, "app_settings", "upsert", merged);
   return merged;
 }
 
@@ -183,6 +197,7 @@ export async function updateNotificationPreferences(
   update: NotificationPreferencesUpdate,
   now: Date = new Date(),
 ): Promise<AppSettings> {
+  await assertSyncGateOk(db);
   const current = await getAppSettings(db, businessId);
 
   const clampHour = (hour: number): number =>
@@ -214,6 +229,7 @@ export async function updateNotificationPreferences(
     updated_at: now.toISOString(),
   };
   await writeSettings(db, merged);
+  await enqueueSyncableWrite(db, "app_settings", "upsert", merged);
   return merged;
 }
 
@@ -230,6 +246,7 @@ export async function recordBackupCompleted(
   businessId: string,
   now: Date = new Date(),
 ): Promise<AppSettings> {
+  await assertSyncGateOk(db);
   const current = await getAppSettings(db, businessId);
   const merged: AppSettings = {
     ...current,
@@ -238,5 +255,6 @@ export async function recordBackupCompleted(
     updated_at: now.toISOString(),
   };
   await writeSettings(db, merged);
+  await enqueueSyncableWrite(db, "app_settings", "upsert", merged);
   return merged;
 }

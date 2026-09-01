@@ -7,6 +7,7 @@
  * since callers always pass both legs together, not by a runtime check).
  */
 import type { SqlDb } from "./types";
+import { assertSyncGateOk, enqueueSyncableWrite } from "../sync/syncHooks";
 
 export type LedgerDirection = "debit" | "credit";
 
@@ -60,6 +61,7 @@ export async function createLedgerEntries(
   db: SqlDb,
   entries: LedgerEntryInput[],
 ): Promise<LedgerEntry[]> {
+  await assertSyncGateOk(db);
   const postedAt = new Date().toISOString();
   const result: LedgerEntry[] = [];
 
@@ -84,7 +86,7 @@ export async function createLedgerEntries(
         null,
       ],
     );
-    result.push({
+    const created: LedgerEntry = {
       id,
       business_data_id: entry.businessDataId,
       account: entry.account,
@@ -93,7 +95,14 @@ export async function createLedgerEntries(
       currency: entry.currency,
       posted_at: postedAt,
       reversal_of: null,
-    });
+    };
+    // Deterministic id + INSERT OR IGNORE (above) already makes this
+    // function idempotent, so it doubles as the pull-apply path too
+    // (sync/applyEnvelope.ts calls it wrapped in
+    // runAsPulledEnvelopeApplication, which makes this a no-op — see
+    // syncContext.ts).
+    await enqueueSyncableWrite(db, "ledger_entry", "insert", created);
+    result.push(created);
   }
 
   return result;
@@ -122,6 +131,7 @@ export async function reverseLedgerEntries(
   db: SqlDb,
   entries: LedgerEntry[],
 ): Promise<LedgerEntry[]> {
+  await assertSyncGateOk(db);
   const postedAt = new Date().toISOString();
   const result: LedgerEntry[] = [];
 
@@ -144,7 +154,7 @@ export async function reverseLedgerEntries(
         entry.id,
       ],
     );
-    result.push({
+    const created: LedgerEntry = {
       id,
       business_data_id: entry.business_data_id,
       account: entry.account,
@@ -153,8 +163,41 @@ export async function reverseLedgerEntries(
       currency: entry.currency,
       posted_at: postedAt,
       reversal_of: entry.id,
-    });
+    };
+    await enqueueSyncableWrite(db, "ledger_entry", "insert", created);
+    result.push(created);
   }
 
   return result;
+}
+
+/**
+ * Sprint 16 — applies a pulled `ledger_entry` insert envelope directly by
+ * the given row's own id (rather than through createLedgerEntries/
+ * reverseLedgerEntries, which each RE-DERIVE an id from businessDataId/
+ * direction/idVariant — correct for local writes, but reversal ids
+ * `{original}-REV` don't fit that derivation, and it would require
+ * threading idVariant back out of an opaque already-built id). INSERT OR
+ * IGNORE keyed on the envelope's own id is idempotent under replay the
+ * same way every other insert-only entity's apply path is.
+ */
+export async function applyPulledLedgerEntry(
+  db: SqlDb,
+  entry: LedgerEntry,
+): Promise<void> {
+  await db.execute(
+    `INSERT OR IGNORE INTO ledger_entries
+       (id, business_data_id, account, direction, amount, currency, posted_at, reversal_of)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      entry.id,
+      entry.business_data_id,
+      entry.account,
+      entry.direction,
+      entry.amount,
+      entry.currency,
+      entry.posted_at,
+      entry.reversal_of,
+    ],
+  );
 }

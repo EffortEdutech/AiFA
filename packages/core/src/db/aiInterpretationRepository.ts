@@ -6,6 +6,7 @@
  * (added in Sprint 3 — see docs update in the same sprint).
  */
 import type { SqlDb } from "./types";
+import { assertSyncGateOk, enqueueSyncableWrite } from "../sync/syncHooks";
 
 export type AiDecision = "auto_record" | "draft_confirm" | "clarify";
 
@@ -47,6 +48,7 @@ export async function recordAiInterpretation(
   db: SqlDb,
   input: RecordAiInterpretationInput,
 ): Promise<AiInterpretation> {
+  await assertSyncGateOk(db);
   const id = `AI-${input.businessDataId.replace(/^BD-/, "")}-${Date.now().toString(36)}`;
   const requestedAt = new Date().toISOString();
   const matchedRuleIdsJson = JSON.stringify(input.matchedRuleIds);
@@ -75,7 +77,7 @@ export async function recordAiInterpretation(
     ],
   );
 
-  return {
+  const record: AiInterpretation = {
     id,
     business_event_id: input.businessEventId,
     business_data_id: input.businessDataId,
@@ -92,6 +94,44 @@ export async function recordAiInterpretation(
     latency_ms: input.latencyMs,
     estimated_cost_usd: input.estimatedCostUsd,
   };
+  await enqueueSyncableWrite(db, "ai_interpretation", "insert", record);
+  return record;
+}
+
+/**
+ * Sprint 16 — applies a pulled `ai_interpretation` insert envelope.
+ * recordAiInterpretation above cannot be reused directly for this: its id
+ * embeds Date.now() at call time, so it can neither accept the
+ * originating device's already-assigned id nor be idempotent under
+ * replay. This function takes the full record as captured in the
+ * envelope and applies it with INSERT OR IGNORE instead.
+ */
+export async function applyPulledAiInterpretation(
+  db: SqlDb,
+  record: AiInterpretation,
+): Promise<void> {
+  await db.execute(
+    `INSERT OR IGNORE INTO ai_interpretations
+       (id, business_event_id, business_data_id, requested_at, model, decision, category, confidence, reasoning, clarifying_question, matched_rule_ids, source_references, pka_version, latency_ms, estimated_cost_usd)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      record.id,
+      record.business_event_id,
+      record.business_data_id,
+      record.requested_at,
+      record.model,
+      record.decision,
+      record.category,
+      record.confidence,
+      record.reasoning,
+      record.clarifying_question,
+      record.matched_rule_ids,
+      record.source_references,
+      record.pka_version,
+      record.latency_ms,
+      record.estimated_cost_usd,
+    ],
+  );
 }
 
 export async function listAiInterpretationsForEvent(

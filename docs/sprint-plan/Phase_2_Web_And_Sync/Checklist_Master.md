@@ -90,29 +90,35 @@ Companion to `00_Sprint_Plan_Overview.md`. Same scope, tracked as checkboxes. Ch
 ## Sprint 16 — Mobile Sync Client & Read-Only Enforcement
 
 **Push**
-- [ ] All syncable mutation types wrapped as Sync Envelopes
-- [ ] Outbox pattern implemented (survives app kill, flushes on reconnect)
-- [ ] Push encrypts with DEK and records `server_seq`
+- [x] All 8 syncable entity_types (Vol 12_1 §3) wrapped as Sync Envelopes at the repository-write boundary — `sync/syncHooks.ts` wired into every producing function, see the runbook's entity table (2026-09-01)
+- [x] Outbox pattern implemented (`sync_outbox`, migrations.ts v11) — survives app kill (persisted table, not in-memory), flushes via `syncClient.ts`'s `pushOutbox` on reconnect (`useSyncResume.ts`, same trigger discipline as Sprint 9's `useAutoResume`) (2026-09-01)
+- [x] Push encrypts with DEK (Sprint 14's `encryptEnvelopePayload`) and records `server_seq` (returned by `SyncTransport.pushEnvelope`, `app/src/db/syncService.ts`'s Supabase implementation) (2026-09-01)
 
 **Pull**
-- [ ] Pull-since-watermark implemented
-- [ ] Pulled envelopes applied via `@aifa/core` `DataAdapter` (not a separate path)
+- [x] Pull-since-watermark implemented — `sync_local_state.last_applied_server_seq`, `syncClient.ts`'s `pullEnvelopes` (2026-09-01)
+- [x] Pulled envelopes applied via the same repository functions local writes use (Sprint 13's `SqlDb`/DataAdapter boundary) — `sync/applyEnvelope.ts`, entity-by-entity mapping documented in the runbook §3 (2026-09-01)
 
 **Idempotency**
-- [ ] Deterministic envelope ids + duplicate-safe apply on pull
-- [ ] Replay test: same envelope applied twice → zero duplicate data
-- [ ] Out-of-order envelope arrival tested explicitly
+- [x] Deterministic envelope ids (`business_id:device_id:device_seq`, Vol 12_1 §3) + duplicate-safe apply on pull (`INSERT OR IGNORE`/`ON CONFLICT DO UPDATE` per entity) (2026-09-01)
+- [x] Replay test: same envelope applied twice → zero duplicate data — automated (`sync.test.ts`), covers both a `business_event` insert and a `ledger_entry` pair explicitly (the DoD's own "no double-counted ledger entry" wording) (2026-09-01)
+- [x] Out-of-order envelope arrival tested explicitly — envelopes handed back in reverse order still applied in ascending `server_seq`, verified against `app_settings` last-write-wins (2026-09-01)
 
 **Read-Only Enforcement**
-- [ ] Write path blocked at `DataAdapter`/`@aifa/core` boundary when not active device (not UI-only)
-- [ ] Direct-write-while-demoted test confirms rejection at the code level
-- [ ] Read-only UI explains which device is active and how to request activation
+- [x] Write path blocked at the repository-function boundary when not active device, before any SQL executes (not UI-only) — `sync/writeGate.ts` + `sync/syncHooks.ts`'s `assertSyncGateOk`, called as the first line of every gated write function (2026-09-01)
+- [x] Direct-write-while-demoted test confirms rejection at the code level — `recordManualCapture` called directly (no UI), rejected with `WriteGateError`, follow-up query confirms zero rows written (2026-09-01)
+- [x] Read-only UI explains which device is active and how to request activation — `ReadOnlyBanner.tsx` + `syncService.ts`'s `requestActivation`/`getWriteAccessState` (code-complete, not exercised on a live device — see runbook §7) (2026-09-01)
 
 **Sprint 16 Definition of Done**
-- [ ] Connectivity-loss/reconnect push scenarios pass
-- [ ] Pull-applied state identical to local-applied state
-- [ ] Duplicate-replay test passes
-- [ ] Demoted-device write rejection proven at code level, not just UI
+- [x] Connectivity-loss/reconnect push scenarios pass — outbox persists across a fresh `SqlDb` instance (simulating app kill) and flushes on the next `pushOutbox` call; reuses Sprint 9's `isOnline`/reconnect trigger pattern via `useSyncResume.ts` (2026-09-01)
+- [x] Pull-applied state identical to local-applied state — verified byte-identical via `getActivityItemByEventId` across two simulated devices (2026-09-01)
+- [x] Duplicate-replay test passes — 3 dedicated tests (push retry, pull replay, ledger pair replay), all automated (2026-09-01)
+- [x] Demoted-device write rejection proven at code level, not just UI — direct repository call, no UI, verified 2026-09-01
+
+**Ad-hoc, logged per Sprint 13's risk-mitigation precedent (not originally in scope)**
+- [x] Fixed `dek.test.ts` (Sprint 14) never actually running on the project's real toolchain — `TS2307` module-resolution gap in `app/tsconfig.json`/Jest config for `@noble/*` subpath imports; all 8 tests now genuinely pass here (2026-09-01)
+- [x] `migrations.test.ts` updated for migration 11's new tables/version count (2026-09-01)
+
+Full regression: 18/18 suites, 151/151 tests passing (2026-09-01).
 
 ---
 
