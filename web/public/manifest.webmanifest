@@ -1,0 +1,9 @@
+{
+  "name": "AiFA — AI Financial Assistant",
+  "short_name": "AiFA",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f172a",
+  "icons": []
+}

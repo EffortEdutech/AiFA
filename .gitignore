@@ -3,6 +3,17 @@
 .env.*
 app/.env
 app/.env.*
+web/.env
+web/.env.*
+# ...but .env.example files ARE meant to be committed (they're templates,
+# not secrets) -- found this sprint: the blanket .env.* pattern above had
+# been silently swallowing app/.env.example since git init (Sprint 15),
+# never actually version-controlled despite README/every .env.example
+# comment assuming it was shipped in the repo. Fixed here rather than
+# left for web/.env.example to repeat the same gap.
+!.env.example
+!app/.env.example
+!web/.env.example
 
 # Dependencies
 node_modules/

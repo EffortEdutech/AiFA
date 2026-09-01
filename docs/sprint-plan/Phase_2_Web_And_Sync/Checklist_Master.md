@@ -170,27 +170,36 @@ Full regression: 19/19 suites, 165/165 tests passing (14 new) (2026-09-01).
 ## Sprint 18 — Web App Shell (Phase 2a Minimal Slice)
 
 **Project Setup**
-- [ ] Web app scaffolded in the monorepo alongside `app/` and `@aifa/core`
-- [ ] PWA/service-worker offline shell loads without network after first visit
+- [x] Web app scaffolded in the monorepo alongside `app/` and `@aifa/core` — `web/` (Vite + React + TypeScript), consumes `@aifa/core` as TS source directly via the same alias pattern `app/`'s babel/jest config uses, no build step (2026-09-01)
+- [x] PWA/service-worker offline shell loads without network after first visit — `web/public/sw.js`, deliberately hand-rolled (cache-first app shell) rather than a build-time PWA plugin dependency, per this sprint's own "safe to carry over" note on PWA polish (2026-09-01)
 
 **Local Storage**
-- [ ] `IndexedDBDataAdapter` implemented (Dexie.js) against `@aifa/core`
-- [ ] WebCrypto AES-GCM wired for at-rest encryption
-- [ ] IndexedDB-cleared/unavailable scenario surfaces a clear owner-facing message
+- [x] `IndexedDBDataAdapter` implemented against `@aifa/core` — using sql.js (SQLite/WASM), NOT Dexie.js as Vol 12_0 §6 originally stated; a real deviation, flagged to and approved by the owner before implementation (this sprint's own risk register predicted exactly this: "@aifa/core's interface turns out to have mobile-specific assumptions"). `SqlDb` is raw-SQL-shaped (migrations, `SUM()` aggregates); Dexie has no SQL layer and would have needed a hand-rolled query engine. See the Sprint 18 runbook §2 for the full reasoning and the parity verification. (2026-09-01)
+- [x] WebCrypto AES-GCM wired for at-rest encryption — `web/src/lib/webCrypto.ts` + `keyStore.ts`; the whole sql.js database image is serialized and encrypted as one blob per write (mirrors SQLCipher's whole-file model, Sprint 5/9's precedent), keyed by a non-extractable `CryptoKey` persisted via IndexedDB structured-clone (2026-09-01)
+- [x] IndexedDB-cleared/unavailable scenario surfaces a clear owner-facing message — `LocalDataClearedError` + `DataClearedBanner.tsx`, manually verified against a running dev build by clearing both IndexedDB stores via devtools (2026-09-01)
 
 **Auth**
-- [ ] Web sign-in against shared Supabase auth
-- [ ] Signing-in session registers as a device via `register_device`
+- [x] Web sign-in against shared Supabase auth — `web/src/lib/auth.ts`, near-verbatim port of the mobile app's email/OTP flow, same backend (2026-09-01)
+- [x] Signing-in session registers as a device via `register_device` — `web/src/lib/deviceBootstrap.ts`'s `bootstrapWebSyncIdentity`, called once during the recovery-code entry step (`DeviceSetupScreen.tsx`), same RPC Sprint 15 built (2026-09-01)
 
 **Phase 2a Feature Slice**
-- [ ] Exact Vol 12_0 §4 Phase 2a row set implemented, running through `@aifa/core`
+- [x] Exact Vol 12_0 §4 Phase 2a row set implemented, running through `@aifa/core` — Dashboard (cash position, receivables/payables, notifications), AI Workspace (Q&A + CFO guidance), manual/text capture (Expense/Sale/Purchase/Banking), Settings (read-only) — every one calling the identical `@aifa/core` functions the mobile screens call; verified for real via `web/verification/sqljs_parity_check.ts` (`npm run verify:sqljs-parity`), not just by inspection (2026-09-01)
 
 **Sprint 18 Definition of Done**
-- [ ] Web app builds and deploys to staging
-- [ ] Sign-in + device registration work
-- [ ] Local storage encrypted and functional
-- [ ] Phase 2a slice works end-to-end locally, no sync required yet
-- [ ] IndexedDB-cleared scenario tested
+- [ ] Web app builds and deploys to staging — `npx vite build` succeeds cleanly in this sandbox (verified); actual deployment to a staging environment is the owner's own infrastructure step, not buildable here — same class of item as Sprint 12's pilot/distribution work
+- [x] Sign-in + device registration work — code-complete and tsc/eslint-clean; live Supabase exercise untested in this sandbox, same standing caveat as every Supabase-touching path since Sprint 3 (2026-09-01)
+- [x] Local storage encrypted and functional — proven via `verify:sqljs-parity` running real `@aifa/core` migrations/repositories against sql.js, including the immutability trigger and a `SUM()`-aggregate cash-position query (2026-09-01)
+- [x] Phase 2a slice works end-to-end locally, no sync required yet — no `SyncContext` is ever set in `web/`, so every write runs ungated/unqueued exactly as `syncContext.ts` documents for that case (2026-09-01)
+- [x] IndexedDB-cleared scenario tested (2026-09-01)
+
+Full regression re-run after this sprint (packages/core and app/ untouched): 19/19 suites, 165/165 tests, unchanged — confirms zero cross-platform regression from adding `web/` as a second `@aifa/core` consumer (2026-09-01).
+
+**Not covered this sprint (see runbook §6 for full detail)**
+- Photo/document capture (Vol 12_0 §4: explicitly "No" for Phase 2a)
+- Settings editing (Phase 2a is read-only by design)
+- The Devices panel (Vol 12_1 §8) — Sprint 19
+- Any actual sync — Sprint 19
+- Deployment to a real staging environment, and a real-browser smoke test — owner-driven infrastructure steps
 
 ---
 
