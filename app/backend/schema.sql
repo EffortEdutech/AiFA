@@ -284,7 +284,7 @@ begin
 end;
 $$;
 
-grant execute on function public.register_device(text, text, text) to aifa_app_role;
+grant execute on function public.register_device(text, text, text) to authenticated;
 
 -- ============================================================
 -- request_activation: ordinary handoff (Vol 12_1 §6a.1-6a.4).
@@ -346,7 +346,7 @@ begin
 end;
 $$;
 
-grant execute on function public.request_activation(text, bigint, uuid) to aifa_app_role;
+grant execute on function public.request_activation(text, bigint, uuid) to authenticated;
 
 -- ============================================================
 -- request_primary_takeover: forced takeover (Vol 12_1 §6a.5, ADR-004).
@@ -406,7 +406,7 @@ begin
 end;
 $$;
 
-grant execute on function public.request_primary_takeover(text, bigint) to aifa_app_role;
+grant execute on function public.request_primary_takeover(text, bigint) to authenticated;
 
 -- ============================================================
 -- set_primary_device: atomic primary reassignment (Vol 12_1 §5a.4).
@@ -448,4 +448,4 @@ begin
 end;
 $$;
 
-grant execute on function public.set_primary_device(text) to aifa_app_role;
+grant execute on function public.set_primary_device(text) to authenticated;
