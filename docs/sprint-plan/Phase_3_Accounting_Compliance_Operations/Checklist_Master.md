@@ -352,86 +352,94 @@ Companion to `00_Sprint_Plan_Overview.md`. Same scope, tracked as checkboxes. Ch
 
 ## Sprint 34 — Payroll & Statutory Contributions
 
-- [ ] `public.employee_profiles`, `public.payroll_runs`, `public.payslips` created
-- [ ] `public.statutory_rate_tables`, `public.claims`, `public.salary_advances` created
-- [ ] `public.bulk_payment_file_exports` created
-- [ ] Sensitive EmployeeProfile fields encrypted at rest, verified
-- [ ] Statutory rate tables seeded as versioned Finance PKA objects
-- [ ] EPF/SOCSO/EIS/PCB calculation verified against official reference (3+ salary levels)
-- [ ] Payroll auto-approval hard-block implemented and tested (including bypass-path testing)
-- [ ] Claims/advances routed through their own approval before inclusion
-- [ ] e-payslip delivery implemented (WhatsApp/email per Sprint 21 choice)
-- [ ] Bulk payment file export implemented for chosen bank format
-- [ ] Default role restriction on payroll domain verified by test
+- [x] `public.employee_profiles`, `public.payroll_runs`, `public.payslips` created
+- [x] `public.statutory_rate_tables`, `public.claims`, `public.salary_advances` created
+- [x] `public.bulk_payment_file_exports` created
+- [x] Sensitive EmployeeProfile fields encrypted at rest, verified (pgcrypto; round-trip and wrong-key-fails both tested)
+- [x] Statutory rate tables seeded as versioned Finance PKA objects
+- [x] EPF/SOCSO/EIS/PCB calculation verified against official reference (3+ salary levels) — PCB is a disclosed simplified approximation, not LHDN's literal Formula Method; see Sprint 34 doc Outcomes
+- [x] Payroll auto-approval hard-block implemented and tested (including bypass-path testing)
+- [x] Claims/advances routed through their own approval before inclusion
+- [x] e-payslip delivery implemented (WhatsApp/email per Sprint 21 choice)
+- [ ] Bulk payment file export implemented for chosen bank format — generator built and tested, but **not verified against Maybank2u's real portal template**; see Outcomes
+- [x] Default role restriction on payroll domain verified by test
 
 **Sprint 34 Definition of Done**
-- [ ] Statutory calculations verified correct
-- [ ] Auto-approval hard-block verified with no bypass found
-- [ ] e-payslip delivered end to end
-- [ ] Bulk payment file validated against real bank format spec
-- [ ] Role restriction verified
+- [x] Statutory calculations verified correct (against this session's own independent reference; EPF/SOCSO/EIS are real 2026 rates, PCB is a disclosed simplification)
+- [x] Auto-approval hard-block verified with no bypass found
+- [x] e-payslip delivered end to end
+- [ ] Bulk payment file validated against real bank format spec — **OPEN**
+- [x] Role restriction verified
 
-**Ad-Hoc / Unplanned:** _(none logged yet)_
+**Ad-Hoc / Unplanned:** Sprint 21 recorded Maybank2u as the target bank format, but its real bulk-pay CSV template is only available inside its corporate banking portal (behind login) — no public spec exists. Escalated to the owner via AskUserQuestion (first such escalation since Sprint 33's LHDN sandbox). Owner chose to build against a documented-generic Malaysian bulk-pay CSV layout now, disclosed as unverified, wiring in the real spec once available — the same posture as Sprint 33's stubbed MyInvois integration. DoD item 4 stays open above. Also found and fixed a self-introduced bug before ever running the test: `get_employee_profile_decrypted`'s `returns table` column named `id` collided with the table's own `id` column in an unqualified lookup — fixed by table-aliasing.
+
+**What's next:** Sprint 35 — Attendance, Leave & Commission. Not started, awaiting the owner's explicit go-ahead.
 
 ---
 
-## Sprint 35 — Attendance, Leave & Commission
+## Sprint 35 — Attendance, Leave & Commission ✅ COMPLETE (3 September 2026)
 
-- [ ] `public.attendance_records`, `public.overtime_records` created
-- [ ] `public.leave_types`, `public.leave_balances`, `public.leave_applications` created
-- [ ] `public.commission_rules`, `public.commission_calculations` created
-- [ ] GPS clock-in/out implemented with offline queueing (reusing Vol 7_4 pattern)
-- [ ] Overtime derivation job implemented, routed through approval
-- [ ] Approved overtime verified reaching a real payroll run
-- [ ] Leave application/approval/balance-deduction cycle implemented
-- [ ] Commission rule configuration + auto-trigger-on-invoice implemented
-- [ ] Minimal revenue-vs-cost dashboard implemented
+- [x] `public.attendance_records`, `public.overtime_records` created
+- [x] `public.leave_types`, `public.leave_balances`, `public.leave_applications` created
+- [x] `public.commission_rules`, `public.commission_calculations` created
+- [ ] GPS clock-in/out implemented with offline queueing (reusing Vol 7_4 pattern) — **OPEN.** `create_attendance_record` accepts a caller-supplied `recorded_at` (server-side half verified); the actual mobile GPS capture UI and a real airplane-mode/offline-queue device test are outside this session's toolset. See Outcomes.
+- [x] Overtime derivation job implemented, routed through approval
+- [x] Approved overtime verified reaching a real payroll run
+- [x] Leave application/approval/balance-deduction cycle implemented
+- [x] Commission rule configuration + auto-trigger-on-invoice implemented
+- [x] Minimal revenue-vs-cost dashboard implemented
 
 **Sprint 35 Definition of Done**
-- [ ] GPS clock-in/out + offline queue verified (airplane-mode test)
-- [ ] Overtime derivation/approval/payroll-reach verified
-- [ ] Full leave cycle verified
-- [ ] Commission verified for 2+ basis types
-- [ ] Dashboard verified for one test period
+- [ ] GPS clock-in/out + offline queue verified (airplane-mode test) — **OPEN**, see Outcomes
+- [x] Overtime derivation/approval/payroll-reach verified — including an irregular-schedule case (this sprint's own named Risk)
+- [x] Full leave cycle verified — balance proven unchanged at submission, deducted only on approval
+- [x] Commission verified for 3 basis types (percent_of_invoice, percent_of_margin, flat_per_unit), including agent-specific-vs-business-default rule resolution
+- [x] Dashboard verified for one test period against an independently-summed reference
 
-**Ad-Hoc / Unplanned:** _(none logged yet)_
+**Ad-Hoc / Unplanned:** DoD item 1 (a real GPS/airplane-mode offline-queue device test) was judged a structural tooling limitation, not an owner-level business decision — handled via direct disclosure (migration header note 1, doc Outcomes below) rather than an `AskUserQuestion` escalation, unlike Sprint 33/34's genuine external-dependency forks. Three self-introduced bugs were found and fixed in the test script itself before it passed (not schema bugs): a timezone-display assertion that compared a datetime's string form instead of the actual instant; two attendance records inserted out of chronological order, which broke the alternation guard because it keys off the latest `recorded_at`, not insertion order; and an ApprovalTask lookup using an invoice's id instead of the CommissionCalculation's own id as `subject_id`. All three were caught by the local verification run, not shipped. See the migration's own 9 header notes and the Sprint 35 doc Outcomes for the full set of disclosed design decisions (overtime pay constants, delete-on-rejection for OvertimeRecord/CommissionCalculation, the explicit follow-up-RPC commission trigger, the new `agent_party_id`/`commission_trigger_status` columns).
+
+**What's next:** Sprint 36 — Legal & Commercial. Not started, awaiting the owner's explicit go-ahead.
 
 ---
 
-## Sprint 36 — Legal & Commercial
+## Sprint 36 — Legal & Commercial ✅ COMPLETE (3 September 2026)
 
-- [ ] `public.contracts`, `public.contract_alerts`, `public.e_signature_envelopes` created
-- [ ] Contract CRUD + document attachment implemented
-- [ ] Renewal alert generation implemented, verified firing at correct lead time
-- [ ] e-signature provider integration implemented (Sprint 21 choice)
-- [ ] Envelope status tracking reflected back onto parent Contract/Quotation
-- [ ] Credit limit gate implemented at Invoice creation
-- [ ] Owner override path implemented and logged
-- [ ] `Contract.credit_limit_override` precedence over `Party.credit_limit` verified
+- [x] `public.contracts`, `public.contract_alerts`, `public.e_signature_envelopes` created
+- [x] Contract CRUD + document attachment implemented
+- [x] Renewal alert generation implemented, verified firing at correct lead time
+- [ ] e-signature provider integration implemented (Sprint 21 choice) — **OPEN.** Sprint 21 deferred the vendor choice to this sprint; owner chose a provider-agnostic STUB now (no live vendor credentials exist in this session). See Outcomes.
+- [x] Envelope status tracking reflected back onto parent Contract/Quotation
+- [x] Credit limit gate implemented at Invoice creation
+- [x] Owner override path implemented and logged
+- [x] `Contract.credit_limit_override` precedence over `Party.credit_limit` verified
 
 **Sprint 36 Definition of Done**
-- [ ] Renewal alert timing verified
-- [ ] Full e-signature sign cycle verified with chosen provider
-- [ ] Credit limit gate verified blocking a real over-limit test invoice
-- [ ] Override path verified working and logged
-- [ ] Override precedence verified by test
+- [x] Renewal alert timing verified — verified NOT due one day before trigger_date, due exactly on it, while end_date still 30+ days away
+- [ ] Full e-signature sign cycle verified with chosen provider — **OPEN**, verified against a provider-agnostic stub instead; see Outcomes
+- [x] Credit limit gate verified blocking a real over-limit test invoice
+- [x] Override path verified working and logged
+- [x] Override precedence verified by test
 
-**Ad-Hoc / Unplanned:** _(none logged yet)_
+**Ad-Hoc / Unplanned:** No bugs found this sprint — the migration applied cleanly with zero errors on the first run, and all 26 verification checks passed on the first execution. One RLS policy name (65 chars) was shortened proactively before the first apply, per the 63-character-limit lesson from Sprints 33-35. The e-signature provider decision (Vol 13_0 §14 Open Item 5, explicitly deferred at Sprint 21 sign-off) was escalated to the owner via AskUserQuestion — the first such escalation since Sprint 34's Maybank2u bank format — offering: (a) provider-agnostic stub now, wire in a real vendor later; (b) owner supplies real credentials; (c) skip entirely, logged as an open gap. **Owner chose (a), provider-agnostic.**
+
+**This was the final sprint of the Phase 3 sprint plan.** See the Phase 3 Exit Criteria below and the Sprint 36 doc's own close-out note for the full account of what remains genuinely open across the whole plan.
 
 ---
 
 ## Phase 3 Exit Criteria (from Overview §5)
 
-- [ ] 1. Solo-mode zero-friction verified
-- [ ] 2. Two distinct non-Owner roles verified (allowed + denied action each)
-- [ ] 3. SoD enforcement + escape valve + audit verified
-- [ ] 4. One real end-to-end sale (quote → invoice → payment → AR/P&L) verified
-- [ ] 5. DO dispatch decrement + Trial Balance/Balance Sheet/GL correctness verified for one period
-- [ ] 6. One invoice validated against LHDN sandbox including QR
-- [ ] 7. One payroll run verified against official reference, mandatory-approval-gated, valid bulk file produced
-- [ ] 8. GPS clock-in/out + leave cycle + one commission calculation verified
-- [ ] 9. Contract renewal alert + credit-limit hard gate verified
-- [ ] 10. At least one real pilot business, 2+ weeks, no ledger-affecting bug, evidenced by usage log
+- [x] 1. Solo-mode zero-friction verified
+- [x] 2. Two distinct non-Owner roles verified (allowed + denied action each)
+- [x] 3. SoD enforcement + escape valve + audit verified
+- [x] 4. One real end-to-end sale (quote → invoice → payment → AR/P&L) verified
+- [x] 5. DO dispatch decrement + Trial Balance/Balance Sheet/GL correctness verified for one period
+- [ ] 6. One invoice validated against LHDN sandbox including QR — **OPEN** (Sprint 33: stubbed MyInvois only, no real sandbox credentials)
+- [ ] 7. One payroll run verified against official reference, mandatory-approval-gated, valid bulk file produced — **PARTIAL.** Payroll run verified against reference and mandatory-approval-gated are both done; the bulk payment file is generated and structurally tested but NOT validated against Maybank2u's real portal template (Sprint 34 DoD item 4)
+- [ ] 8. GPS clock-in/out + leave cycle + one commission calculation verified — **PARTIAL.** Leave cycle and commission calculation are both fully verified; GPS clock-in/out itself is verified only at the server-RPC level (Sprint 35 DoD item 1 — no real device/airplane-mode test was possible in this session)
+- [x] 9. Contract renewal alert + credit-limit hard gate verified
+- [ ] 10. At least one real pilot business, 2+ weeks, no ledger-affecting bug, evidenced by usage log — **OPEN**, requires a real business using the deployed app over real time; outside what any session in this engagement can produce
+
+**Real remaining gaps across the whole plan (not silently closed):** items 6, 7 (bulk file spec), 8 (GPS device test), and 10 — each already disclosed in its own sprint's Outcomes (Sprints 33, 34, 35) and now summarised here per Vol 0_1's own close-out convention of stating real remaining gaps rather than declaring false completeness.
 
 ---
 

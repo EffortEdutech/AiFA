@@ -1,0 +1,14 @@
+{
+  "knowledge_object_id": "MY-SOCSO",
+  "version": "MY-SOCSO-2026",
+  "jurisdiction": "MY",
+  "effective_from": "2026-01-01",
+  "advice_boundary": "AiFA computes and organises SOCSO-relevant figures and flags obligations; it does not replace a licensed payroll/tax professional's formal advice or filing responsibility (Vol 6_9 Section 5, extended to payroll by Vol 13_0 Section 10).",
+  "source_note": "Rates researched via web search against secondary 2026 Malaysian payroll-reference sources this session could reach, NOT verified against PERKESO/SOCSO's own primary published contribution table directly. Confirm against the official SOCSO Second Category contribution table before relying on this for a real payroll run. Not owner-editable in-app, per Vol 13_0 Section 10's explicit instruction.",
+  "scheme": "socso",
+  "category": "second_category",
+  "employee_rate": 0.005,
+  "employer_rate": 0.0175,
+  "wage_ceiling_myr": 6000,
+  "notes": "Employment Injury + Invalidity Scheme (Second Category), effective since October 2024's ceiling change. Wages above RM6,000 are contributed on RM6,000 (capped), not a graduated bracket table."
+}

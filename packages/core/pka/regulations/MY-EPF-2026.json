@@ -1,0 +1,14 @@
+{
+  "knowledge_object_id": "MY-EPF",
+  "version": "MY-EPF-2026",
+  "jurisdiction": "MY",
+  "effective_from": "2026-01-01",
+  "advice_boundary": "AiFA computes and organises EPF-relevant figures and flags obligations; it does not replace a licensed payroll/tax professional's formal advice or filing responsibility (Vol 6_9 Section 5, extended to payroll by Vol 13_0 Section 10).",
+  "source_note": "Rates researched via web search against secondary 2026 Malaysian payroll-reference sources this session could reach, NOT verified against KWSP/EPF's own primary published contribution table directly. Confirm against the official EPF Third Schedule before relying on this for a real payroll run. Not owner-editable in-app, per Vol 13_0 Section 10's explicit instruction — a correction here is a data update, not a code change.",
+  "scheme": "epf",
+  "employee_rate": 0.11,
+  "employer_rate_low": 0.13,
+  "employer_rate_high": 0.12,
+  "employer_threshold_myr": 5000,
+  "notes": "Employee under 60. Employer rate is 13% for monthly wages at or below RM5,000, 12% above. No graduated bracket table modelled — a flat rate switch at the threshold, per the sources this session could reach."
+}

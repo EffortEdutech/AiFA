@@ -1,0 +1,25 @@
+{
+  "knowledge_object_id": "MY-PCB",
+  "version": "MY-PCB-2026",
+  "jurisdiction": "MY",
+  "effective_from": "2026-01-01",
+  "advice_boundary": "AiFA computes and organises PCB-relevant figures and flags obligations; it does not replace a licensed tax professional's formal advice or filing responsibility (Vol 6_9 Section 5, extended to payroll by Vol 13_0 Section 10).",
+  "source_note": "IMPORTANT: this is a SIMPLIFIED progressive-bracket approximation of LHDN's real PCB (Potongan Cukai Bulanan / Monthly Tax Deduction) Schedule and Formula Method, built from the published YA2025/2026 resident individual income tax bracket table plus a flat RM9,000 personal relief and RM7,000 EPF/life-insurance relief cap. It does NOT model marital-status category (single/married/spouse-not-working), number of children, zakat, or any other relief LHDN's real PCB Table/Formula Method accounts for. This is illustrative only, not a real LHDN-compliant PCB calculation — the owner's own tax advisor should confirm before this is relied on for a real payroll run. Not owner-editable in-app, per Vol 13_0 Section 10's explicit instruction.",
+  "scheme": "pcb",
+  "method": "simplified_annualised_progressive",
+  "personal_relief_myr": 9000,
+  "epf_relief_cap_myr": 7000,
+  "brackets": [
+    { "lower": 0, "upper": 5000, "rate": 0.00 },
+    { "lower": 5000, "upper": 20000, "rate": 0.01 },
+    { "lower": 20000, "upper": 35000, "rate": 0.03 },
+    { "lower": 35000, "upper": 50000, "rate": 0.06 },
+    { "lower": 50000, "upper": 70000, "rate": 0.11 },
+    { "lower": 70000, "upper": 100000, "rate": 0.19 },
+    { "lower": 100000, "upper": 400000, "rate": 0.25 },
+    { "lower": 400000, "upper": 600000, "rate": 0.26 },
+    { "lower": 600000, "upper": 2000000, "rate": 0.28 },
+    { "lower": 2000000, "upper": null, "rate": 0.30 }
+  ],
+  "formula": "monthly_pcb = round(annual_tax(annual_gross - min(annual_epf_employee, epf_relief_cap_myr) - personal_relief_myr) / 12, 2), where annual_tax() applies the bracket table progressively to chargeable income."
+}

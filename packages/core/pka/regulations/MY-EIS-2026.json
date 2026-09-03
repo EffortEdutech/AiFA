@@ -1,0 +1,13 @@
+{
+  "knowledge_object_id": "MY-EIS",
+  "version": "MY-EIS-2026",
+  "jurisdiction": "MY",
+  "effective_from": "2026-01-01",
+  "advice_boundary": "AiFA computes and organises EIS-relevant figures and flags obligations; it does not replace a licensed payroll/tax professional's formal advice or filing responsibility (Vol 6_9 Section 5, extended to payroll by Vol 13_0 Section 10).",
+  "source_note": "Rates researched via web search against secondary 2026 Malaysian payroll-reference sources this session could reach, NOT verified against PERKESO/SIP's own primary published contribution table directly. Confirm against the official Employment Insurance System table before relying on this for a real payroll run. Not owner-editable in-app, per Vol 13_0 Section 10's explicit instruction.",
+  "scheme": "eis",
+  "employee_rate": 0.002,
+  "employer_rate": 0.002,
+  "wage_ceiling_myr": 6000,
+  "notes": "Same RM6,000 wage ceiling as SOCSO. Wages above the ceiling are contributed on RM6,000, not a graduated bracket table."
+}
