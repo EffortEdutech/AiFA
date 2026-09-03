@@ -1,10 +1,11 @@
 {
-  "pka_version": "0.3.0",
+  "pka_version": "0.4.0",
   "domains": [
     "expense",
     "sale",
     "purchase",
-    "banking"
+    "banking",
+    "pricing"
   ],
   "confidence_thresholds": {
     "auto_record_min": 0.9,
@@ -162,6 +163,13 @@
       "description": "A Bank Fee event classifies against Operating Expenses:Bank Fees. Deposit/Withdrawal events matched to an existing outstanding receivable/payable settle that item's Accounts Receivable/Payable balance; unmatched Deposit/Withdrawal events post against Owner's Equity / Drawings as a generic capital-in/out placeholder. Applied deterministically in app/src/db/bankingRepository.ts (Sprint 7) -- Banking is manual-entry only in Phase 1 (Vol 0_1 Section 4), so this rule is not run through the AI classification pipeline the way EXP/SALE/PUR rules are; it is recorded here for governance/audit provenance, not runtime PCB assembly.",
       "applies_when": "domain_hint == 'banking'",
       "output": "see description -- posting shape depends on transaction_type and whether a reconciliation match was made"
+    },
+    {
+      "id": "PRICE-001",
+      "domain": "pricing",
+      "description": "The unit price used for a product on any document (quotation, invoice, etc.) resolves in order: (1) the party's own assigned price type, if it has an effective PriceListEntry for this product; (2) the business's default price type's effective PriceListEntry for this product, used whenever step 1 doesn't apply -- either because the party has no price type assigned, or its assigned price type exists but has no effective entry for this specific product (this second fallback case is a disclosed extension beyond Vol 13_0 Section 5's literal two-step wording, added so a party with a price type that simply hasn't been given an entry for a given product still gets a usable price instead of a hard failure); (3) if neither resolves, no price is returned and the caller must raise a clarify/error, never silently default to 0 or null. 'Effective' means effective_from <= today and (effective_to is null or effective_to >= today), preferring the most recent effective_from when more than one entry qualifies. Applied deterministically in public.resolve_price (Sprint 27) -- price resolution is not run through the AI classification pipeline the way EXP/SALE/PUR rules are; it is recorded here for governance/audit provenance, not runtime PCB assembly.",
+      "applies_when": "domain_hint == 'pricing' || resolving a unit_price for a product+party pair on any outbound document",
+      "output": "unit_price, price_type_id, price_list_entry_id, used_business_default -- see public.resolve_price's return shape"
     }
   ],
   "limitations": [
@@ -171,6 +179,7 @@
     "Purchase domain's capitalisation-vs-expense distinction (Vol 6_2 Section 4) is approximated by a flat category match (Operating Expenses:* or Cost of Goods Sold) -- no formal inventory/asset ledger yet (Vol 6_5, Phase 3).",
     "This bundle does not provide tax-filing advice; see Vol 6_9 Section 5.",
     "Payroll, inventory, and asset domains are explicitly out of Phase 1 scope (Vol 0_1).",
-    "Overdue receivables (Vol 0_1 Section 6) are approximated by a captured_at-age threshold, not a real invoice due date -- Phase 1's BusinessData schema has no due-date field (Vol 11_1 Section 3)."
+    "Overdue receivables (Vol 0_1 Section 6) are approximated by a captured_at-age threshold, not a real invoice due date -- Phase 1's BusinessData schema has no due-date field (Vol 11_1 Section 3).",
+    "Pricing (Sprint 27) covers manual per-product-per-price-type prices only -- cost_source 'auto_from_purchase' on public.products is stubbed and rejected server-side until the Purchase module addendum ships; promo_note on a PriceListEntry is a bare text field, not a structured promotion/discount engine."
   ]
 }

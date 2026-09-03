@@ -1,0 +1,40 @@
+{
+  "knowledge_object_id": "MY-SST-RATES",
+  "version": "1.0.0",
+  "jurisdiction": "MY",
+  "effective_from": "2026-09-03",
+  "advice_boundary": "AiFA computes and organises SST-relevant figures from these rates; it does not replace a licensed tax professional's formal advice or filing responsibility (Vol 6_9 Section 5). Rates below are illustrative placeholders pending the owner's own confirmed SST registration category.",
+  "source_note": "Not sourced from a live Kastam/RMCD feed this sprint — the owner's tax advisor should confirm every code and rate against their actual registration before these are relied on for a real filing.",
+  "rates": [
+    {
+      "sst_code": "SR-10",
+      "tax_type": "sales_tax",
+      "rate": 0.10,
+      "description": "Sales Tax — standard rate (illustrative; confirm against your own registration)."
+    },
+    {
+      "sst_code": "SR-5",
+      "tax_type": "sales_tax",
+      "rate": 0.05,
+      "description": "Sales Tax — reduced rate for certain goods (illustrative)."
+    },
+    {
+      "sst_code": "SV-8",
+      "tax_type": "service_tax",
+      "rate": 0.08,
+      "description": "Service Tax — standard rate (illustrative)."
+    },
+    {
+      "sst_code": "SV-6",
+      "tax_type": "service_tax",
+      "rate": 0.06,
+      "description": "Service Tax — legacy/reduced rate for certain services (illustrative)."
+    },
+    {
+      "sst_code": "EX",
+      "tax_type": "exempt",
+      "rate": 0.00,
+      "description": "Exempt / out of scope of SST."
+    }
+  ]
+}

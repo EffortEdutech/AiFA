@@ -1,0 +1,29 @@
+{
+  "knowledge_object_id": "MY-EINVOICE-RULES",
+  "version": "1.0.0",
+  "jurisdiction": "MY",
+  "effective_from": "2026-09-03",
+  "advice_boundary": "AiFA computes and organises e-Invoice-relevant figures and submission state from these rules; it does not replace a licensed tax professional's formal advice or filing responsibility (Vol 6_9 Section 5).",
+  "source_note": "A first-draft rule set only — this sprint has no live LHDN MyInvois sandbox connection (see Sprint 33's own Outcomes), so these validation rules have not been checked against a real IRB response. Correcting a rule here is a data update to this file, not a code change, once real sandbox feedback is available.",
+  "required_invoice_fields": [
+    "supplier_tin",
+    "supplier_registration_no",
+    "buyer_tin_or_consumer_flag",
+    "invoice_type_code",
+    "currency",
+    "issue_date",
+    "line_items",
+    "grand_total"
+  ],
+  "invoice_type_codes": [
+    { "code": "01", "description": "Invoice" },
+    { "code": "02", "description": "Credit Note" },
+    { "code": "03", "description": "Debit Note" },
+    { "code": "04", "description": "Refund Note" }
+  ],
+  "consolidation_rule": {
+    "description": "A consolidated e-Invoice batch may only include non-B2B (consumer) transactions for the stated period; a buyer with a registered TIN must receive its own itemised e-Invoice, not be folded into a consolidated batch.",
+    "server_side_mapping": "public.generate_consolidated_einvoice_batch treats a Party with no tin set as eligible for consolidation, and a Party with a tin set as B2B (excluded) — an approximation of the real LHDN eligibility test, disclosed in the Sprint 33 migration's own header note 4."
+  },
+  "submission_states": ["draft", "submitted", "validated", "rejected", "cancelled"]
+}
