@@ -60,24 +60,40 @@ function openKeyStoreDb(): Promise<IDBDatabase> {
   });
 }
 
-/** Sprint 19 -- persists the owner's recovery code (see this module's own header comment for why this replaced Sprint 18's CryptoKey-object persistence). */
-export async function storeRecoveryCode(recoveryCode: string): Promise<void> {
+/**
+ * Sprint 52 bugfix -- this and every other function below used ONE global
+ * IndexedDB key for the recovery code, regardless of which business it
+ * belonged to (same root-cause class as getOrCreateWebDeviceId's own
+ * Sprint 52 fix above): a browser that completes setup for business A and
+ * later signs into business B would have B's restoreWebSyncIdentity read
+ * back A's recovery code and derive a DEK from (A's code, B's business
+ * id) -- neither A's nor B's real Business DEK, silently. Confirmed this
+ * was reachable, not theoretical: this sprint's own QA walkthrough set up
+ * NHL Global Solution then Art Angkut Enterprise from the same browser.
+ * Keyed per business_id now, exactly like device_id and the setup-complete
+ * flag -- and, per those two fixes' own doc, deliberately with NO
+ * automatic legacy-global migration (that heuristic raced across
+ * businesses in this exact sprint's testing). A browser already set up
+ * under the old global-key scheme needs its one legacy value copied to
+ * its own scoped key by hand.
+ */
+export async function storeRecoveryCode(businessId: string, recoveryCode: string): Promise<void> {
   const db = await openKeyStoreDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(KEY_STORE, "readwrite");
-    tx.objectStore(KEY_STORE).put(recoveryCode, RECOVERY_CODE_KEY_ID);
+    tx.objectStore(KEY_STORE).put(recoveryCode, RECOVERY_CODE_KEY_ID + ":" + businessId);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error ?? new Error("IndexedDB write failed"));
   });
   db.close();
 }
 
-/** Loads the previously-stored recovery code, or null if none is stored (first run, or IndexedDB was cleared). */
-export async function loadRecoveryCode(): Promise<string | null> {
+/** Loads the previously-stored recovery code for THIS business. Returns null if nothing is stored (first run for this business, or IndexedDB was cleared). */
+export async function loadRecoveryCode(businessId: string): Promise<string | null> {
   const db = await openKeyStoreDb();
   const code = await new Promise<string | null>((resolve, reject) => {
     const tx = db.transaction(KEY_STORE, "readonly");
-    const req = tx.objectStore(KEY_STORE).get(RECOVERY_CODE_KEY_ID);
+    const req = tx.objectStore(KEY_STORE).get(RECOVERY_CODE_KEY_ID + ":" + businessId);
     req.onsuccess = () => resolve((req.result as string | undefined) ?? null);
     req.onerror = () => reject(req.error ?? new Error("IndexedDB read failed"));
   });
@@ -85,11 +101,11 @@ export async function loadRecoveryCode(): Promise<string | null> {
   return code;
 }
 
-export async function clearStoredRecoveryCode(): Promise<void> {
+export async function clearStoredRecoveryCode(businessId: string): Promise<void> {
   const db = await openKeyStoreDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(KEY_STORE, "readwrite");
-    tx.objectStore(KEY_STORE).delete(RECOVERY_CODE_KEY_ID);
+    tx.objectStore(KEY_STORE).delete(RECOVERY_CODE_KEY_ID + ":" + businessId);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error ?? new Error("IndexedDB delete failed"));
   });
@@ -107,21 +123,69 @@ export async function importNonExtractableDbKey(dekBytes: Uint8Array): Promise<C
   );
 }
 
-const DEVICE_ID_STORAGE_KEY = "aifa_web_device_id";
-const RECOVERY_SETUP_FLAG_KEY = "aifa_web_sync_bootstrapped";
+const DEVICE_ID_STORAGE_KEY_PREFIX = "aifa_web_device_id:";
+const RECOVERY_SETUP_FLAG_KEY_PREFIX = "aifa_web_sync_bootstrapped:";
 
-export function getOrCreateWebDeviceId(): string {
-  const existing = localStorage.getItem(DEVICE_ID_STORAGE_KEY);
+/**
+ * Sprint 51 -- generates a brand-new recovery code for a business that has
+ * never had ANY device registered before (DeviceSetupScreen.tsx's "first
+ * device on web" branch). Uses the SAME format mobile's own first-device
+ * path already produces (app/src/db/client.ts's randomHex(32) via
+ * expo-crypto) -- a 32-byte/64-hex-char random string -- so a mobile app
+ * added later can enter this exact code and derive the identical Business
+ * DEK, with no format mismatch between platforms.
+ */
+export function generateRecoveryCode(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Sprint 52 bugfix -- device_id used to live under ONE global localStorage
+ * key shared by every business ever signed into from this browser.
+ * Confirmed live this sprint: registering NHL Global Solution, then
+ * signing in as a different Owner and registering Art Angkut Enterprise
+ * from the SAME browser sent the SAME device_id to register_device for a
+ * second business -- devices' primary key is device_id alone, so the
+ * second call failed with a devices_pkey duplicate-key violation.
+ *
+ * Scoping the stored id per business_id is the fix, not a devices schema
+ * change: business_id on that table already encodes "this device belongs
+ * to exactly one business" everywhere downstream (active_device_lock,
+ * register_device's own per-membership advisory lock, every other devices
+ * RPC) -- the real unit was always (browser, business), not just browser,
+ * once a browser can plausibly sign into more than one business over its
+ * lifetime (exactly what this sprint's QA walkthrough did).
+ *
+ * Deliberately NO automatic migration of the old global key: an earlier
+ * version of this fix tried migrating it in "for whichever business asks
+ * first", but that is genuinely ambiguous once more than one business has
+ * ever used this browser -- confirmed live this same sprint, App.tsx's
+ * mount-time restoreWebSyncIdentity() call raced this exact migration
+ * across two open businesses and handed NHL Global Solution's already-real
+ * device_id to Art Angkut Enterprise instead. A browser that already had a
+ * device registered under the old single-key scheme needs that one value
+ * copied into its OWN scoped key exactly once, by hand (ops/devtools),
+ * rather than by a heuristic that cannot tell which business it belongs
+ * to. Every business setup from this sprint onward only ever writes and
+ * reads its own scoped key.
+ */
+export function getOrCreateWebDeviceId(businessId: string): string {
+  const key = DEVICE_ID_STORAGE_KEY_PREFIX + businessId;
+  const existing = localStorage.getItem(key);
   if (existing) return existing;
+
   const id = crypto.randomUUID();
-  localStorage.setItem(DEVICE_ID_STORAGE_KEY, id);
+  localStorage.setItem(key, id);
   return id;
 }
 
-export function markLocalSetupComplete(): void {
-  localStorage.setItem(RECOVERY_SETUP_FLAG_KEY, "true");
+export function markLocalSetupComplete(businessId: string): void {
+  localStorage.setItem(RECOVERY_SETUP_FLAG_KEY_PREFIX + businessId, "true");
 }
 
-export function hasCompletedLocalSetup(): boolean {
-  return localStorage.getItem(RECOVERY_SETUP_FLAG_KEY) === "true";
+/** Sprint 52 bugfix -- scoped per business_id, no automatic legacy-global migration (see getOrCreateWebDeviceId's doc above for why that heuristic was removed: it raced across businesses and mis-attributed state). A browser already set up under the old scheme needs its one legacy "true" copied to its own scoped key by hand. */
+export function hasCompletedLocalSetup(businessId: string): boolean {
+  return localStorage.getItem(RECOVERY_SETUP_FLAG_KEY_PREFIX + businessId) === "true";
 }

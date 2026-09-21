@@ -23,8 +23,8 @@
  */
 import { buildCapturePcb, categoriesForDomain } from "./pcb";
 import type {
+  AiLedgerDomain,
   AiProvider,
-  BusinessDomain,
   VisionExtractedFields,
 } from "./types";
 import accountingRules from "../../pka/accounting_rules.json";
@@ -116,7 +116,7 @@ export interface InterpretationOutcome {
 }
 
 export interface RunCaptureInterpretationInput {
-  domain: BusinessDomain;
+  domain: AiLedgerDomain;
   businessId: string;
   description: string;
   counterpartyName?: string;
@@ -144,7 +144,7 @@ export interface RunCaptureInterpretationInput {
  * duplicated per domain.
  */
 function ledgerAccountsForDomain(
-  domain: BusinessDomain,
+  domain: AiLedgerDomain,
   category: string,
   paymentMethod: PaymentMethod,
 ): { debitAccount: string; creditAccount: string } {
@@ -164,7 +164,7 @@ function ledgerAccountsForDomain(
 }
 
 function isKnownCategory(
-  domain: BusinessDomain,
+  domain: AiLedgerDomain,
   category: string | null,
 ): category is string {
   if (!category) return false;
@@ -186,7 +186,7 @@ const AI_INTERPRETED_DOMAINS: DomainHint[] = ["expense", "sale", "purchase"];
  */
 const TRUSTED_MAPPING_CONFIDENCE_FLOOR = 0.95;
 
-function isAiInterpretedDomain(domain: DomainHint): domain is BusinessDomain {
+function isAiInterpretedDomain(domain: DomainHint): domain is AiLedgerDomain {
   return (AI_INTERPRETED_DOMAINS as DomainHint[]).includes(domain);
 }
 
@@ -223,7 +223,7 @@ async function finalizeCategory(
   db: SqlDb,
   eventId: string,
   dataId: string,
-  domain: BusinessDomain,
+  domain: AiLedgerDomain,
   category: string,
   confidence: number,
   amount: number,
@@ -296,7 +296,7 @@ async function classifyAndRoute(
   data: BusinessData,
   options?: { isOnline?: boolean },
 ): Promise<InterpretationOutcome> {
-  const domain = event.domain_hint as BusinessDomain;
+  const domain = event.domain_hint as AiLedgerDomain;
 
   if (options?.isOnline === false) {
     await setBusinessEventStatus(db, event.id, "queued");
@@ -538,7 +538,7 @@ export async function confirmCategory(
       `Cannot confirm a category for a Business Event in status '${event.status}'.`,
     );
   }
-  const domain = event.domain_hint as BusinessDomain;
+  const domain = event.domain_hint as AiLedgerDomain;
   if (!isKnownCategory(domain, chosenCategory)) {
     throw new Error(
       `'${chosenCategory}' is not a recognised Phase 1 '${domain}' category.`,
@@ -603,7 +603,7 @@ export async function correctConfirmedCapture(
       `Business Event '${originalEventId}' has already been corrected (superseded by '${original.event.superseded_by}').`,
     );
   }
-  const domain = original.event.domain_hint as BusinessDomain;
+  const domain = original.event.domain_hint as AiLedgerDomain;
   if (!isKnownCategory(domain, correctedCategory)) {
     throw new Error(
       `'${correctedCategory}' is not a recognised Phase 1 '${domain}' category.`,

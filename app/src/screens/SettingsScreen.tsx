@@ -32,7 +32,7 @@ import { getDb, getDeviceEncryptionKey, getLocalBusinessId } from "@/db/client";
 import { deleteRemoteAccountData } from "@/db/deletionService";
 import { writeExportFiles } from "@/db/exportService";
 import { hasCompletedSyncBootstrap } from "@/db/syncBootstrap";
-import { requestOtp, signOut, useAuthSession, verifyOtp } from "@/lib/auth";
+import { signIn, signOut, signUp, useAuthSession } from "@/lib/auth";
 
 /**
  * Settings & Business Configuration — Vol 7_7, Sprint 10 concrete build.
@@ -71,9 +71,9 @@ export default function SettingsScreen() {
   >(null);
 
   const { session, isLoading: authLoading } = useAuthSession();
-  const [otpEmail, setOtpEmail] = useState("");
-  const [otpCode, setOtpCode] = useState("");
-  const [otpStage, setOtpStage] = useState<"email" | "code">("email");
+  const [authMode, setAuthMode] = useState<"signIn" | "signUp">("signIn");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
 
@@ -187,32 +187,24 @@ export default function SettingsScreen() {
     }
   }
 
-  async function handleRequestOtp() {
+  async function handleAuthSubmit() {
     setAuthBusy(true);
     setAuthMessage(null);
     try {
-      const result = await requestOtp(otpEmail);
+      const result =
+        authMode === "signUp"
+          ? await signUp(authEmail, authPassword)
+          : await signIn(authEmail, authPassword);
       if (result.ok) {
-        setOtpStage("code");
-        setAuthMessage("Check your email for a sign-in code.");
-      } else {
+        // result.error carries an informational message (e.g. "confirm
+        // your email") even on ok:true for signUp when no session was
+        // created yet -- surface it, but only clear the form once a real
+        // session exists (useAuthSession picks that up automatically).
         setAuthMessage(result.error);
-      }
-    } finally {
-      setAuthBusy(false);
-    }
-  }
-
-  async function handleVerifyOtp() {
-    setAuthBusy(true);
-    setAuthMessage(null);
-    try {
-      const result = await verifyOtp(otpEmail, otpCode);
-      if (result.ok) {
-        setOtpStage("email");
-        setOtpEmail("");
-        setOtpCode("");
-        setAuthMessage(null);
+        if (!result.error) {
+          setAuthEmail("");
+          setAuthPassword("");
+        }
       } else {
         setAuthMessage(result.error);
       }
@@ -481,46 +473,49 @@ export default function SettingsScreen() {
               Optional. Your business data stays on this device either way —
               signing in only enables encrypted cloud backup.
             </Text>
-            {otpStage === "email" ? (
-              <>
-                <TextInput
-                  style={styles.input}
-                  value={otpEmail}
-                  onChangeText={setOtpEmail}
-                  placeholder="you@example.com"
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                />
-                <Pressable
-                  style={styles.button}
-                  onPress={handleRequestOtp}
-                  disabled={authBusy}
-                >
-                  <Text style={styles.buttonText}>
-                    {authBusy ? "Sending…" : "Send sign-in code"}
-                  </Text>
-                </Pressable>
-              </>
-            ) : (
-              <>
-                <TextInput
-                  style={styles.input}
-                  value={otpCode}
-                  onChangeText={setOtpCode}
-                  placeholder="6-digit code"
-                  keyboardType="number-pad"
-                />
-                <Pressable
-                  style={styles.button}
-                  onPress={handleVerifyOtp}
-                  disabled={authBusy}
-                >
-                  <Text style={styles.buttonText}>
-                    {authBusy ? "Verifying…" : "Verify code"}
-                  </Text>
-                </Pressable>
-              </>
-            )}
+            <TextInput
+              style={styles.input}
+              value={authEmail}
+              onChangeText={setAuthEmail}
+              placeholder="you@example.com"
+              autoCapitalize="none"
+              keyboardType="email-address"
+            />
+            <TextInput
+              style={styles.input}
+              value={authPassword}
+              onChangeText={setAuthPassword}
+              placeholder="Password"
+              secureTextEntry
+              autoCapitalize="none"
+            />
+            <Pressable
+              style={styles.button}
+              onPress={handleAuthSubmit}
+              disabled={authBusy || !authEmail || !authPassword}
+            >
+              <Text style={styles.buttonText}>
+                {authBusy
+                  ? authMode === "signUp"
+                    ? "Creating…"
+                    : "Signing in…"
+                  : authMode === "signUp"
+                    ? "Create account"
+                    : "Sign in"}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setAuthMode(authMode === "signUp" ? "signIn" : "signUp");
+                setAuthMessage(null);
+              }}
+            >
+              <Text style={styles.label}>
+                {authMode === "signUp"
+                  ? "Already have an account? Sign in instead"
+                  : "New here? Create an account"}
+              </Text>
+            </Pressable>
             {authMessage && <Text style={styles.savedText}>{authMessage}</Text>}
           </>
         )}

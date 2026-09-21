@@ -6,7 +6,9 @@
  * change from the original inline versions.
  */
 import type {
+  BusinessDomain,
   CategoryClassificationResult,
+  DomainClassificationResult,
   ProfessionalContextBundle,
   VisionExtractedFields,
   VisionExtractionResult,
@@ -49,6 +51,58 @@ export function parseClassificationJson(text: string): CategoryClassificationRes
           (id): id is string => typeof id === "string",
         )
       : [],
+  };
+}
+
+/**
+ * Sprint 57 (Phase 5, 14 September 2026) — reuses the SAME `/ai-chat`
+ * Gateway route `buildPrompt`/`classify()` already call (see
+ * gatewayProvider.ts's `chat()` helper). No new Gateway server route is
+ * needed for this capability, unlike vision/`buildVisionPrompt` — a
+ * genuine, disclosed difference worth stating plainly rather than
+ * assuming every new AI capability needs new server infrastructure.
+ */
+export function buildDomainClassificationPrompt(
+  rawText: string,
+  candidateDomains: BusinessDomain[],
+): string {
+  return [
+    "You are the Universal Input Router for a small-business finance app (Vol_5_5).",
+    "A business owner captured the text below — by typing it, forwarding a WhatsApp/email message, or having a photo/PDF/voice note already extracted to this text. Decide which ONE of the candidate domains it belongs to, and extract whatever structured fields you can read confidently.",
+    "",
+    `Candidate domains: ${candidateDomains.join(", ")}`,
+    `Captured text: ${JSON.stringify(rawText)}`,
+    "",
+    "Respond with ONLY a single JSON object, no prose, no markdown fences, matching exactly:",
+    '{"domain": string | null, "confidence": number between 0 and 1, "reasoning": string, "extracted_fields": object}',
+    'Set domain to null (and confidence below 0.5) if the text does not clearly match any candidate domain — never force a guess into the closest-sounding option. "extracted_fields" is a flat object of whatever you found (e.g. amount, counterparty, startDate, endDate, lineItems) — omit fields you did not find rather than inventing a value; never fabricate a field the text does not support.',
+  ].join("\n");
+}
+
+export function parseDomainClassificationJson(
+  text: string,
+  candidateDomains: BusinessDomain[],
+): DomainClassificationResult {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) {
+    throw new Error("AI domain-classification response did not contain a JSON object.");
+  }
+  const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+  const domainCandidate = parsed.domain;
+  const domain: BusinessDomain | null =
+    typeof domainCandidate === "string" &&
+    (candidateDomains as string[]).includes(domainCandidate)
+      ? (domainCandidate as BusinessDomain)
+      : null; // an unrecognised or missing domain is treated as "couldn't tell", never guessed into the nearest candidate
+  const fields =
+    typeof parsed.extracted_fields === "object" && parsed.extracted_fields !== null
+      ? (parsed.extracted_fields as Record<string, unknown>)
+      : {};
+  return {
+    domain,
+    confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0,
+    reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",
+    extractedFields: fields,
   };
 }
 

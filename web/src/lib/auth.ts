@@ -1,11 +1,16 @@
 /**
  * Web sign-in — Sprint 18 (Vol 12_0 §6a Auth: "Web sign-in against the
  * existing Supabase auth, same backend as mobile, no parallel auth
- * system"). Deliberately a near-verbatim port of app/src/lib/auth.ts's
- * email/OTP flow (same shouldCreateUser:true single-call sign-up/sign-in,
- * same requestOtp/verifyOtp/signOut/useAuthSession shape) — the one real
+ * system"). A near-verbatim port of app/src/lib/auth.ts's auth module
+ * (same signUp/signIn/signOut/useAuthSession shape) — the one real
  * difference is session storage (browser localStorage via
  * supabaseClient.ts, not SecureStore), noted there.
+ *
+ * Switched from email/OTP to email+password 2026-09-07, same reasoning as
+ * app/src/lib/auth.ts's header comment: OTP's numeric code only arrives if
+ * the project has custom SMTP + a custom email template configured, which
+ * is real setup cost blocking sign-in on a fresh cloud project. Password
+ * auth needs no outbound email for the core sign-in path.
  */
 import type { Session } from "@supabase/supabase-js";
 import { useEffect, useState } from "react";
@@ -17,31 +22,47 @@ export interface AuthActionResult {
   error: string | null;
 }
 
-export async function requestOtp(email: string): Promise<AuthActionResult> {
-  const trimmed = email.trim();
-  if (!trimmed) {
-    return { ok: false, error: "Enter an email address." };
-  }
-  const { error } = await supabase.auth.signInWithOtp({
-    email: trimmed,
-    options: { shouldCreateUser: true },
-  });
-  return { ok: !error, error: error?.message ?? null };
-}
-
-export async function verifyOtp(
+/**
+ * Creates a new account with a password. On a project where email
+ * confirmation is required, Supabase returns success with no session yet
+ * -- surfaced to the UI as a distinct message rather than a silent no-op.
+ */
+export async function signUp(
   email: string,
-  token: string,
+  password: string,
 ): Promise<AuthActionResult> {
   const trimmed = email.trim();
-  const trimmedToken = token.trim();
-  if (!trimmed || !trimmedToken) {
-    return { ok: false, error: "Enter both the email and the code." };
+  if (!trimmed || !password) {
+    return { ok: false, error: "Enter both an email and a password." };
   }
-  const { error } = await supabase.auth.verifyOtp({
+  const { data, error } = await supabase.auth.signUp({
     email: trimmed,
-    token: trimmedToken,
-    type: "email",
+    password,
+  });
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  if (!data.session) {
+    return {
+      ok: true,
+      error: "Account created. Check your email to confirm it before signing in.",
+    };
+  }
+  return { ok: true, error: null };
+}
+
+/** Signs in an existing owner with their email and password. */
+export async function signIn(
+  email: string,
+  password: string,
+): Promise<AuthActionResult> {
+  const trimmed = email.trim();
+  if (!trimmed || !password) {
+    return { ok: false, error: "Enter both an email and a password." };
+  }
+  const { error } = await supabase.auth.signInWithPassword({
+    email: trimmed,
+    password,
   });
   return { ok: !error, error: error?.message ?? null };
 }

@@ -25,6 +25,7 @@ Professional improvement happens through Knowledge Factory and updated Finance P
 | 5_2 | AI Agent Architecture — Professional Intelligence Agents (BIE, FIE, CAE as agent instances) |
 | 5_3 | AI Context Management Architecture — PCB lifecycle within a conversation, safety and governance checks |
 | 5_4 | AI Learning & Feedback Architecture — how owner feedback reaches BKEE and, indirectly, Knowledge Factory |
+| 5_5 | Universal Input & Channel Router Architecture — how input reaches the platform from any channel before classification (Draft) |
 
 ## 4. Platform Flow
 

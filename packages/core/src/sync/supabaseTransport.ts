@@ -93,6 +93,16 @@ export interface DeviceRow {
   last_synced_server_seq: number;
   is_primary: boolean;
   revoked_at: string | null;
+  /** Added Sprint 38 (Vol 12_1 §5b's ad-hoc devices/active_device_lock
+   * re-scoping was schema-only when it shipped -- this transport's own
+   * row/domain mapping was never updated to carry the column through,
+   * even though `select("*")` already returned it. Small, disclosed
+   * completion of that existing migration, not a new backend change --
+   * see Sprint 38's own Outcomes. Nullable only because a device row
+   * created before that migration's backfill could theoretically
+   * predate it; the migration's own backfill makes this not-null for
+   * every real row in practice. */
+  business_membership_id: string | null;
 }
 
 export interface RegisteredDevice {
@@ -104,6 +114,9 @@ export interface RegisteredDevice {
   lastSyncedServerSeq: number;
   isPrimary: boolean;
   revokedAt: string | null;
+  /** See DeviceRow's own note (Sprint 38) -- which membership this
+   * device belongs to (Vol 12_1 §5b). */
+  businessMembershipId: string | null;
 }
 
 export function toRegisteredDevice(row: DeviceRow): RegisteredDevice {
@@ -116,6 +129,7 @@ export function toRegisteredDevice(row: DeviceRow): RegisteredDevice {
     lastSyncedServerSeq: row.last_synced_server_seq,
     isPrimary: row.is_primary,
     revokedAt: row.revoked_at,
+    businessMembershipId: row.business_membership_id,
   };
 }
 

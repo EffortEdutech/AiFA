@@ -108,6 +108,7 @@ This table is binding across all volumes. Any document that would introduce conf
 | 5_2 | AI Agent Architecture | Complete, V2.0 |
 | 5_3 | AI Context Management Architecture | Complete, V2.0 |
 | 5_4 | AI Learning & Feedback Architecture | Complete, V2.0 |
+| 5_5 | Universal Input & Channel Router Architecture | Draft, V2.0 |
 
 ### Series 6 — Business Operations Architecture
 | Vol | Title | Status |

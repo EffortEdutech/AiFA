@@ -19,6 +19,8 @@ import {
   type ActiveDeviceInfo,
   type RegisteredDevice,
 } from "../lib/syncService";
+import { useAccess } from "../shell/AccessContext";
+import { TabStrip } from "../shell/TabStrip";
 
 interface Props {
   db: SqlDb;
@@ -41,8 +43,19 @@ interface Props {
  * made across web/src/components (no modal component exists anywhere in
  * this package yet), and is a deliberately smaller investment than
  * porting React Native's Alert.alert semantics to the browser.
+ *
+ * Sprint 38 (Vol 12_1 §5b, Vol 12_2 §5.4) adds per-membership scoping:
+ * a non-Owner member sees only their own devices by default; the Owner
+ * gets an additional "All Devices" tab across every membership. This
+ * needed `RegisteredDevice.businessMembershipId`, which the underlying
+ * transport (packages/core/src/sync/supabaseTransport.ts) had never
+ * actually mapped even though the column existed server-side since
+ * Sprint 23's ad-hoc migration -- added as a small, disclosed transport
+ * fix this sprint (see that file's own note), not a new backend change.
  */
 export function DevicesPanel({ db, businessId, deviceId, dek }: Props): JSX.Element {
+  const { myMembership, membershipChecked, isOwner } = useAccess();
+  const [scopeTab, setScopeTab] = useState<"my" | "all">("my");
   const [devices, setDevices] = useState<RegisteredDevice[] | null>(null);
   const [activeInfo, setActiveInfo] = useState<ActiveDeviceInfo | null>(null);
   const [maxServerSeq, setMaxServerSeq] = useState(0);
@@ -191,10 +204,38 @@ export function DevicesPanel({ db, businessId, deviceId, dek }: Props): JSX.Elem
         Every device registered for this business — who's active, who's
         primary, and how caught-up each one is.
       </p>
+      {isOwner && (
+        <TabStrip
+          tabs={[
+            { id: "my", label: "My Devices" },
+            { id: "all", label: "All Devices" },
+          ]}
+          active={scopeTab}
+          onChange={setScopeTab}
+        />
+      )}
       {devices === null ? (
         <p className="muted">Loading…</p>
       ) : (
-        devices.map((device) => {
+        devices
+          .filter((device) => {
+            if (isOwner && scopeTab === "all") return true;
+            // Non-Owner, or Owner's own "My Devices" tab: scope to the
+            // signed-in user's own membership (Vol 12_1 §5b). While the
+            // membership lookup is still in flight, hide every row
+            // rather than briefly showing every member's devices — the
+            // AccessContext doc comment calls this exact flash out for
+            // Owner-only UI, and it applies equally here since scoping
+            // is enforced client-side, not by the devices query itself
+            // (getAllDevices returns every device for the business).
+            // Once the lookup has resolved (membershipChecked), a null
+            // myMembership is the intentional dev-bypass/unrestricted
+            // path and stays unrestricted, as before.
+            if (!membershipChecked) return false;
+            if (!myMembership) return true;
+            return device.businessMembershipId === myMembership.id;
+          })
+          .map((device) => {
           const isMe = device.deviceId === deviceId;
           const isRevoked = !!device.revokedAt;
           const isActive = !isRevoked && activeInfo?.activeDeviceId === device.deviceId;

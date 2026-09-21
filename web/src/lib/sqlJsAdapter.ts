@@ -99,6 +99,35 @@ export class LocalDataClearedError extends Error {
   }
 }
 
+/**
+ * Sibling of LocalDataClearedError, added after Sprint 40's first-ever
+ * live-backend verification surfaced this as a real, previously-uncaught
+ * crash: IndexedDB *did* still have a stored blob (the `stored` branch
+ * below), but `decryptWithCryptoKey` failed with WebCrypto's own
+ * OperationError -- which is exactly what AES-GCM throws when the key
+ * doesn't match (a different signed-in account, or a backend reset that
+ * left an orphaned local blob behind), not file corruption. Extends
+ * LocalDataClearedError (rather than being a wholly separate type) so it
+ * is caught by every existing `instanceof LocalDataClearedError` check
+ * -- App.tsx's own recovery path (wipe the local blob, redo device
+ * setup) is the correct fix for this case too, it's just a different,
+ * more accurate message for the owner.
+ */
+export class LocalDataKeyMismatchError extends LocalDataClearedError {
+  constructor() {
+    super();
+    Object.defineProperty(this, "message", {
+      value:
+        "This browser's saved local data doesn't match your current sign-in " +
+        "(a different account, or the backend was reset). Nothing was lost " +
+        "on your other devices -- reset this browser's local copy to " +
+        "continue; it will resync from the server.",
+      configurable: true,
+    });
+    this.name = "LocalDataKeyMismatchError";
+  }
+}
+
 let sqlJsPromise: Promise<SqlJsStatic> | null = null;
 function getSqlJs(): Promise<SqlJsStatic> {
   if (!sqlJsPromise) {
@@ -120,7 +149,21 @@ export async function openIndexedDbSqlAdapter(dek: CryptoKey): Promise<SqlDb> {
 
   let sqlite: Database;
   if (stored) {
-    const plaintext = await decryptWithCryptoKey(dek, stored.ciphertext, stored.iv);
+    let plaintext: Uint8Array;
+    try {
+      plaintext = await decryptWithCryptoKey(dek, stored.ciphertext, stored.iv);
+    } catch (err) {
+      // AES-GCM auth-tag verification failing (WebCrypto's OperationError)
+      // means the wrong key was used to decrypt this blob -- not that the
+      // blob is corrupt. The only way that happens here is a stale local
+      // database left behind by a different account/session (see
+      // LocalDataKeyMismatchError's own header). Anything else genuinely
+      // unexpected still propagates rather than being silently swallowed.
+      if (err instanceof DOMException && err.name === "OperationError") {
+        throw new LocalDataKeyMismatchError();
+      }
+      throw err;
+    }
     sqlite = new SQL.Database(plaintext);
   } else if (hasWebDbEverBeenInitialized()) {
     throw new LocalDataClearedError();

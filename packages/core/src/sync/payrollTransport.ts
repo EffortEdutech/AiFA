@@ -455,8 +455,7 @@ export function createSupabasePayrollTransport(client: SupabaseClientLike): Supa
         p_encryption_key: params.encryptionKey,
       });
       if (error) throw error;
-      const rows = data as EmployeeProfileRow[];
-      return toEmployeeProfile(rows[0]);
+      return toEmployeeProfile(data as EmployeeProfileRow);
     },
 
     async getEmployeeProfileDecrypted(employeeProfileId, encryptionKey) {
@@ -485,8 +484,7 @@ export function createSupabasePayrollTransport(client: SupabaseClientLike): Supa
         p_period: params.period,
       });
       if (error) throw error;
-      const rows = data as PayrollRunRow[];
-      return toPayrollRun(rows[0]);
+      return toPayrollRun(data as PayrollRunRow);
     },
 
     async submitPayrollRun(payrollRunId) {
@@ -494,8 +492,7 @@ export function createSupabasePayrollTransport(client: SupabaseClientLike): Supa
         p_payroll_run_id: payrollRunId,
       });
       if (error) throw error;
-      const rows = data as PayrollRunRow[];
-      return toPayrollRun(rows[0]);
+      return toPayrollRun(data as PayrollRunRow);
     },
 
     async markPayslipSent(payslipId, channel) {
@@ -504,8 +501,7 @@ export function createSupabasePayrollTransport(client: SupabaseClientLike): Supa
         p_channel: channel,
       });
       if (error) throw error;
-      const rows = data as PayslipRow[];
-      return toPayslip(rows[0]);
+      return toPayslip(data as PayslipRow);
     },
 
     async generateBulkPaymentFileExport(params) {
@@ -515,8 +511,7 @@ export function createSupabasePayrollTransport(client: SupabaseClientLike): Supa
         p_bank_format: params.bankFormat ?? "Maybank2u",
       });
       if (error) throw error;
-      const rows = data as BulkPaymentFileExportRow[];
-      return toBulkPaymentFileExport(rows[0]);
+      return toBulkPaymentFileExport(data as BulkPaymentFileExportRow);
     },
 
     async markPayrollRunPaid(payrollRunId) {
@@ -524,8 +519,7 @@ export function createSupabasePayrollTransport(client: SupabaseClientLike): Supa
         p_payroll_run_id: payrollRunId,
       });
       if (error) throw error;
-      const rows = data as PayrollRunRow[];
-      return toPayrollRun(rows[0]);
+      return toPayrollRun(data as PayrollRunRow);
     },
 
     async createClaim(params) {
@@ -537,8 +531,7 @@ export function createSupabasePayrollTransport(client: SupabaseClientLike): Supa
         p_document_id_receipt: params.documentIdReceipt ?? null,
       });
       if (error) throw error;
-      const rows = data as ClaimRow[];
-      return toClaim(rows[0]);
+      return toClaim(data as ClaimRow);
     },
 
     async createSalaryAdvance(params) {
@@ -548,8 +541,7 @@ export function createSupabasePayrollTransport(client: SupabaseClientLike): Supa
         p_amount: params.amount,
       });
       if (error) throw error;
-      const rows = data as SalaryAdvanceRow[];
-      return toSalaryAdvance(rows[0]);
+      return toSalaryAdvance(data as SalaryAdvanceRow);
     },
   };
 }

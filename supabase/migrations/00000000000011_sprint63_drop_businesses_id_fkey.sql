@@ -1,0 +1,20 @@
+-- Sprint 63 follow-up — discovered live while regression-testing
+-- 00000000000010_sprint63_multi_business_per_owner.sql.
+--
+-- businesses.id carried an implicit FK to auth.users(id) ON DELETE CASCADE
+-- (businesses_id_fkey), a leftover of the pre-Sprint-63 design where
+-- businesses.id was ALWAYS the owner's own auth.uid(). Architecture §2.2
+-- requires a fresh, independently-generated id for every NEW business, so
+-- that id can no longer be assumed to exist in auth.users -- the FK must
+-- be dropped or every create_business call for a second+ business fails
+-- with a foreign-key violation (confirmed live: this is exactly the error
+-- the un-migrated schema threw during this sprint's own regression test).
+--
+-- owner_user_id keeps its own FK to auth.users(id) unchanged -- ownership
+-- is still always a real login; only the business's own primary key no
+-- longer needs to be one.
+--
+-- Existing rows are unaffected: for every business created before this
+-- sprint, id already equals its owner's auth.uid(), so nothing about
+-- those rows' actual values changes.
+alter table public.businesses drop constraint businesses_id_fkey;

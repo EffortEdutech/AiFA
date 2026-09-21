@@ -9,22 +9,34 @@
     "splash": {
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "studio.myeffort.aifa"
     },
     "android": {
-      "package": "studio.myeffort.aifa"
+      "package": "studio.myeffort.aifa",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "plugins": [
       "expo-secure-store",
       [
         "expo-camera",
         {
-          "cameraPermission": "AIFA uses the camera to capture receipts and invoices."
+          "cameraPermission": "AIFA uses the camera to capture receipts and invoices.",
+          "microphonePermission": "AIFA does not use the microphone; this permission is required by the camera module on some devices."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "4e30d6c3-cd22-4932-8e58-0f503a5ac75e"
+      }
+    }
   }
 }

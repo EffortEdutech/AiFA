@@ -79,9 +79,22 @@ Configured Graphify scope:
 - app/pka
 - packages/core/src
 - packages/core/pka
+- web/src (added 2026-09-04, Phase 4 web frontend -- previously missing from
+  scope entirely; the graph was rebuilt on this date via `graphify update .
+  --no-cluster` to bring it current through Sprint 49 and include this
+  directory for the first time)
 - docs/architecture/v2.0
 - docs/sprint-plan
 - docs/ideas
+
+Note (2026-09-04): the graph had gone stale (last built 2026-08-02, before
+nearly all of Phase 3/4) and was not being queried during Sprint 47-49 work
+-- both are fixed as of this rebuild; see graphify-out/graph.json's own
+mtime for the current build date. Structural re-extraction (`graphify
+update`) needs no LLM key and was used here; semantic clustering /
+community naming (GRAPH_REPORT.md, community labels) still needs
+GEMINI_API_KEY or GOOGLE_API_KEY and was skipped in this rebuild --
+`hyperedges` is currently empty in graph.json as a result.
 
 ## Obsidian Rules
 

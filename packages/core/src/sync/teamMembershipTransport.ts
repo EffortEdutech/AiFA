@@ -40,6 +40,65 @@ export interface SupabaseClientLike {
 export type EffectiveAccessModel = "solo" | "team";
 export type AccessModelOverride = "forced_solo" | "forced_team" | null;
 
+/** Row shape of public.businesses (Vol 13_1 §2; ssm_registration_number added Vol 13_4). */
+export interface BusinessRow {
+  id: string;
+  owner_user_id: string;
+  legal_name: string | null;
+  industry: string | null;
+  ssm_registration_number: string | null;
+  pka_version: string | null;
+  created_at: string;
+}
+
+export interface Business {
+  id: string;
+  ownerUserId: string;
+  legalName: string | null;
+  industry: string | null;
+  ssmRegistrationNumber: string | null;
+  pkaVersion: string | null;
+  createdAt: string;
+}
+
+function toBusiness(row: BusinessRow): Business {
+  return {
+    id: row.id,
+    ownerUserId: row.owner_user_id,
+    legalName: row.legal_name,
+    industry: row.industry,
+    ssmRegistrationNumber: row.ssm_registration_number,
+    pkaVersion: row.pka_version,
+    createdAt: row.created_at,
+  };
+}
+
+/** Row shape returned by public.list_my_businesses() (Sprint 63, Architecture §2.1 —
+ * docs/aifa-platform/Architecture.md). One row per Client Business the calling
+ * login has an ACTIVE business_membership in. */
+export interface MyBusinessRow {
+  business_id: string;
+  legal_name: string | null;
+  role_id: string;
+  membership_status: "invited" | "active" | "suspended" | "removed";
+}
+
+export interface MyBusinessSummary {
+  businessId: string;
+  legalName: string | null;
+  roleId: string;
+  membershipStatus: "invited" | "active" | "suspended" | "removed";
+}
+
+function toMyBusinessSummary(row: MyBusinessRow): MyBusinessSummary {
+  return {
+    businessId: row.business_id,
+    legalName: row.legal_name,
+    roleId: row.role_id,
+    membershipStatus: row.membership_status,
+  };
+}
+
 /** Row shape of public.business_memberships (Sprint 23/24, Vol 13_1 §4). */
 export interface BusinessMembershipRow {
   id: string;
@@ -54,6 +113,8 @@ export interface BusinessMembershipRow {
   accepted_at: string | null;
   removed_at: string | null;
   invited_email: string | null;
+  /** Owner-set per-business override/nickname (Sprint 50, member identity) — see set_member_label(). Independent of the member's own profiles.display_name. */
+  owner_label: string | null;
 }
 
 export interface BusinessMembership {
@@ -69,6 +130,7 @@ export interface BusinessMembership {
   acceptedAt: string | null;
   removedAt: string | null;
   invitedEmail: string | null;
+  ownerLabel: string | null;
 }
 
 function toBusinessMembership(row: BusinessMembershipRow): BusinessMembership {
@@ -85,6 +147,7 @@ function toBusinessMembership(row: BusinessMembershipRow): BusinessMembership {
     acceptedAt: row.accepted_at,
     removedAt: row.removed_at,
     invitedEmail: row.invited_email,
+    ownerLabel: row.owner_label,
   };
 }
 
@@ -101,6 +164,24 @@ export interface SupabaseTeamMembershipTransport {
     businessId: string,
     override: AccessModelOverride,
   ): Promise<{ accessModelOverride: AccessModelOverride }>;
+  /** Vol 13_4 §2, revised Sprint 63 (Architecture §2.2) — creates a new Client
+   * Business for the caller (fresh, independently-generated `id`; one Owner
+   * membership created in the same call). The one-login-owns-at-most-one-
+   * business guard is REMOVED as of Sprint 63: the same login may call this
+   * more than once, ending up with an Owner membership in each resulting
+   * business. Pre-Sprint-63 businesses keep their existing `id` (which
+   * happens to equal their owner's `auth.uid()`) unchanged. */
+  createBusiness(
+    legalName: string,
+    industry?: string | null,
+    ssmRegistrationNumber?: string | null,
+  ): Promise<Business>;
+  /** Sprint 63 (Architecture §2.1) — every Client Business the calling login
+   * has an ACTIVE business_membership in, for Workspace Resolution on
+   * sign-in: zero rows means no business yet (route to BusinessCreatePage or
+   * an invite-acceptance screen), one row auto-selects, more than one offers
+   * the Workspace Switcher. */
+  listMyBusinesses(): Promise<MyBusinessSummary[]>;
   /** Vol 13_1 §4, Vol 13_3 §4 — role is assigned at invite time, never deferred to acceptance. `configure` on `settings`-gated. */
   inviteMember(
     businessId: string,
@@ -113,12 +194,30 @@ export interface SupabaseTeamMembershipTransport {
   suspendMembership(targetMembershipId: string): Promise<BusinessMembership>;
   /** Always requires `configure` on `settings` (no self-service removal — Vol 13_1 does not describe a "leave this business" flow, only an administrative one). Blocked at the operation level if the target is the sole active Owner. Auto-revokes every device the removed membership held. */
   removeMembership(targetMembershipId: string): Promise<BusinessMembership>;
+  /** Member identity (Sprint 50) — `configure` on `settings` required, same gate `inviteMember` uses. Sets/clears this membership's Owner-assigned label, which takes priority over the member's own `profiles.display_name` when resolving a display name (see `list_member_identities`). Pass null/empty to clear back to the member's own name. */
+  setMemberLabel(targetMembershipId: string, label: string | null): Promise<BusinessMembership>;
 }
 
 export function createSupabaseTeamMembershipTransport(
   client: SupabaseClientLike,
 ): SupabaseTeamMembershipTransport {
   return {
+    async createBusiness(legalName, industry, ssmRegistrationNumber) {
+      const { data, error } = await client.rpc("create_business", {
+        p_legal_name: legalName,
+        p_industry: industry ?? null,
+        p_ssm_registration_number: ssmRegistrationNumber ?? null,
+      });
+      if (error) throw error;
+      return toBusiness(data as BusinessRow);
+    },
+
+    async listMyBusinesses() {
+      const { data, error } = await client.rpc("list_my_businesses");
+      if (error) throw error;
+      return (data as MyBusinessRow[]).map(toMyBusinessSummary);
+    },
+
     async getEffectiveAccessModel(businessId) {
       const { data, error } = await client.rpc("effective_access_model", {
         p_business_id: businessId,
@@ -166,6 +265,15 @@ export function createSupabaseTeamMembershipTransport(
     async removeMembership(targetMembershipId) {
       const { data, error } = await client.rpc("remove_membership", {
         p_target_membership_id: targetMembershipId,
+      });
+      if (error) throw error;
+      return toBusinessMembership(data as BusinessMembershipRow);
+    },
+
+    async setMemberLabel(targetMembershipId, label) {
+      const { data, error } = await client.rpc("set_member_label", {
+        p_membership_id: targetMembershipId,
+        p_label: label,
       });
       if (error) throw error;
       return toBusinessMembership(data as BusinessMembershipRow);

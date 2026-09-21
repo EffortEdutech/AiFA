@@ -38,6 +38,8 @@ export type StockMovementType =
   | "opening" | "purchase_receipt" | "delivery_out" | "adjustment_increase" | "adjustment_decrease";
 export type StockMovementSourceType = "delivery_order" | "purchase_invoice" | "stock_take" | "manual";
 export type StockTakeStatus = "in_progress" | "completed";
+/** Sprint 59. Same drafted/approved/rejected vocabulary as AttendanceCorrectionStatus. */
+export type StockAdjustmentStatus = "drafted" | "approved" | "rejected";
 
 /** Row shape of public.warehouses (Sprint 31, Vol 13_0 §7). */
 export interface WarehouseRow {
@@ -203,6 +205,49 @@ export interface StockTakeCountInput {
   countedQty: number;
 }
 
+/** Row shape of public.stock_adjustments (Sprint 59) — a lightweight, single-line sibling to Stock Take for a one-off correction, not a replacement for it. */
+export interface StockAdjustmentRow {
+  id: string;
+  business_id: string;
+  product_id: string;
+  warehouse_id: string;
+  quantity_delta: number;
+  reason: string | null;
+  status: StockAdjustmentStatus;
+  captured_by_membership_id: string | null;
+  decided_by_membership_id: string | null;
+  created_at: string;
+}
+
+export interface StockAdjustment {
+  id: string;
+  businessId: string;
+  productId: string;
+  warehouseId: string;
+  /** Positive = increase, negative = decrease. Posted as one adjustment_increase/decrease StockMovement on approval — see createStockAdjustment. */
+  quantityDelta: number;
+  reason: string | null;
+  status: StockAdjustmentStatus;
+  capturedByMembershipId: string | null;
+  decidedByMembershipId: string | null;
+  createdAt: string;
+}
+
+function toStockAdjustment(row: StockAdjustmentRow): StockAdjustment {
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    productId: row.product_id,
+    warehouseId: row.warehouse_id,
+    quantityDelta: row.quantity_delta,
+    reason: row.reason,
+    status: row.status,
+    capturedByMembershipId: row.captured_by_membership_id,
+    decidedByMembershipId: row.decided_by_membership_id,
+    createdAt: row.created_at,
+  };
+}
+
 export interface SupabaseInventoryDeliveryTransport {
   /**
    * `configure` on `inventory` — a setup-level action; only the Owner
@@ -287,6 +332,29 @@ export interface SupabaseInventoryDeliveryTransport {
    * 'completed'; throws on a second call.
    */
   completeStockTake(stockTakeId: string): Promise<StockTake>;
+
+  /**
+   * `capture` on `inventory`. Sprint 59. Drafts a single-line stock
+   * adjustment (a stated `quantityDelta`, positive to increase or
+   * negative to decrease) and opens its own ApprovalTask — a
+   * lightweight sibling to the full Stock Take flow above, not a
+   * replacement for it. This is one of Sprint 61's five permanently-
+   * approval-gated domains — never auto-approved by the capture
+   * router regardless of AI confidence. On approval, posts one
+   * adjustment_increase/decrease StockMovement and updates
+   * stock_levels accordingly (creating the stock_levels row if this
+   * is the first-ever movement for the product/warehouse pair).
+   * Throws `product_is_not_stock_tracked` for a product with
+   * `trackInventory = false`, same as recordOpeningStock.
+   */
+  createStockAdjustment(params: {
+    businessId: string;
+    productId: string;
+    warehouseId: string;
+    quantityDelta: number;
+    reason?: string | null;
+    aiDraftSummary?: string | null;
+  }): Promise<StockAdjustment>;
 }
 
 export function createSupabaseInventoryDeliveryTransport(
@@ -368,6 +436,19 @@ export function createSupabaseInventoryDeliveryTransport(
       });
       if (error) throw error;
       return toStockTake(data as StockTakeRow);
+    },
+
+    async createStockAdjustment(params) {
+      const { data, error } = await client.rpc("create_stock_adjustment", {
+        p_business_id: params.businessId,
+        p_product_id: params.productId,
+        p_warehouse_id: params.warehouseId,
+        p_quantity_delta: params.quantityDelta,
+        p_reason: params.reason ?? null,
+        p_ai_draft_summary: params.aiDraftSummary ?? null,
+      });
+      if (error) throw error;
+      return toStockAdjustment(data as StockAdjustmentRow);
     },
   };
 }

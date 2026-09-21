@@ -44,6 +44,8 @@ export type ContractStatus = "draft" | "pending_signature" | "active" | "expired
 export type ContractAlertType = "renewal_upcoming" | "expiring" | "expired";
 export type ContractAlertStatus = "pending" | "acknowledged";
 export type ESignatureStatus = "sent" | "viewed" | "signed" | "declined" | "expired";
+/** Sprint 60. public.e_signature_envelopes itself has no draft/undispatched status (see this file's own header) — e_signature_requests is the new draft-then-approve layer in front of it; only on 'approved' does a trigger insert the real e_signature_envelopes row (which starts life at 'sent'). */
+export type ESignatureRequestStatus = "drafted" | "approved" | "rejected";
 
 /** Row shape of public.contracts. */
 export interface ContractRow {
@@ -171,6 +173,50 @@ function toESignatureEnvelope(row: ESignatureEnvelopeRow): ESignatureEnvelope {
   };
 }
 
+/** Row shape of public.e_signature_requests (Sprint 60). */
+export interface ESignatureRequestRow {
+  id: string;
+  business_id: string;
+  contract_id: string | null;
+  quotation_id: string | null;
+  provider: string;
+  status: ESignatureRequestStatus;
+  captured_by_membership_id: string | null;
+  decided_by_membership_id: string | null;
+  created_envelope_id: string | null;
+  created_at: string;
+}
+
+export interface ESignatureRequest {
+  id: string;
+  businessId: string;
+  /** Exactly one of contractId/quotationId is set. */
+  contractId: string | null;
+  quotationId: string | null;
+  provider: string;
+  status: ESignatureRequestStatus;
+  capturedByMembershipId: string | null;
+  decidedByMembershipId: string | null;
+  /** Populated only once approved — the real e_signature_envelopes row this request produced. */
+  createdEnvelopeId: string | null;
+  createdAt: string;
+}
+
+function toESignatureRequest(row: ESignatureRequestRow): ESignatureRequest {
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    contractId: row.contract_id,
+    quotationId: row.quotation_id,
+    provider: row.provider,
+    status: row.status,
+    capturedByMembershipId: row.captured_by_membership_id,
+    decidedByMembershipId: row.decided_by_membership_id,
+    createdEnvelopeId: row.created_envelope_id,
+    createdAt: row.created_at,
+  };
+}
+
 /** Row shape of public.credit_limit_override_log. */
 export interface CreditLimitOverrideLogRow {
   id: string;
@@ -198,20 +244,15 @@ export interface CreditLimitOverrideLogEntry {
   createdAt: string;
 }
 
-function toCreditLimitOverrideLogEntry(row: CreditLimitOverrideLogRow): CreditLimitOverrideLogEntry {
-  return {
-    id: row.id,
-    businessId: row.business_id,
-    invoiceId: row.invoice_id,
-    partyId: row.party_id,
-    requestedAmount: row.requested_amount,
-    effectiveCreditLimit: row.effective_credit_limit,
-    outstandingBalanceBefore: row.outstanding_balance_before,
-    overriddenByMembershipId: row.overridden_by_membership_id,
-    reason: row.reason,
-    createdAt: row.created_at,
-  };
-}
+// NOTE (found/fixed Sprint 47 — same dead-code shape as Sprint 44's
+// `toSstRate`): a `CreditLimitOverrideLogRow` -> `CreditLimitOverrideLogEntry`
+// converter is unnecessary here because no RPC on this transport returns
+// override-log rows to convert (there is no `listCreditLimitOverrideLog`
+// RPC — see `legalCommercial.ts`'s own lib-level converter, which reads
+// the table directly and does this conversion itself). A private,
+// never-called converter of this exact shape was invisible to `tsc`
+// until this sprint's code first imported this module; removed rather
+// than left as dead code.
 
 /** Row shape of public.invoices as returned by the two invoice-creation RPCs below (see quotationInvoiceTransport.ts for the full InvoiceRow shape used elsewhere). */
 export interface InvoiceRow {
@@ -226,7 +267,7 @@ export interface InvoiceRow {
 }
 
 export interface SupabaseLegalCommercialTransport {
-  /** `capture` on `legal_contract`. Drafts a Contract and opens its own ApprovalTask. If `endDate` and `renewalNoticeDays` are both given, a ContractAlert is generated immediately (`triggerDate = endDate - renewalNoticeDays`) — the alert becomes due at that lead time, not on `endDate` itself. */
+  /** `capture` on `legal_contract`. Drafts a Contract and opens its own ApprovalTask. If `endDate` and `renewalNoticeDays` are both given, a ContractAlert is generated immediately (`triggerDate = endDate - renewalNoticeDays`) — the alert becomes due at that lead time, not on `endDate` itself. Sprint 60: this is also the RPC the capture router's `contract_alert` domain drafts into — the sprint doc's own "draft entry against the Contracts & Alerts schema" wording turned out to mean drafting a whole Contract, since a ContractAlert has no standalone draft path of its own (see legalCommercialTransport.ts's own header note on this). */
   createContract(params: {
     businessId: string;
     counterpartyId: string;
@@ -237,6 +278,7 @@ export interface SupabaseLegalCommercialTransport {
     renewalNoticeDays?: number | null;
     documentId?: string | null;
     creditLimitOverride?: number | null;
+    aiDraftSummary?: string | null;
   }): Promise<Contract>;
 
   /** `view` on `legal_contract`. Lists ContractAlerts whose `triggerDate` has been reached as of `asOf` (default today) and are still 'pending' — also stamps `notifiedAt` the first time each becomes due. */
@@ -260,6 +302,15 @@ export interface SupabaseLegalCommercialTransport {
 
   /** Requires `capture` on the envelope's own domain. Moves 'sent'/'viewed' -> 'declined'. Does NOT change the parent Contract/Quotation's own status. */
   markEsignatureEnvelopeDeclined(envelopeId: string): Promise<ESignatureEnvelope>;
+
+  /** `capture` on `legal_contract` (for a Contract) or `capture` on `sales` (for a Quotation) — exactly one of `contractId`/`quotationId` must be given. Sprint 60. Drafts an e_signature_requests row and opens its own ApprovalTask (domain `legal_contract`); this is one of the domains this bridge sprint permanently excludes from any confidence-based auto-record shortcut. The real e_signature_envelopes row (see `createEsignatureEnvelope` above) is only created — meaning only actually dispatched, since that lifecycle has no draft status of its own — once this request is approved. */
+  createEsignatureRequestDraft(params: {
+    businessId: string;
+    contractId?: string | null;
+    quotationId?: string | null;
+    provider?: string;
+    aiDraftSummary?: string | null;
+  }): Promise<ESignatureRequest>;
 
   /**
    * `capture` on `sales`. Converts an 'accepted' Quotation to an Invoice —
@@ -291,10 +342,10 @@ export function createSupabaseLegalCommercialTransport(client: SupabaseClientLik
         p_renewal_notice_days: params.renewalNoticeDays ?? null,
         p_document_id: params.documentId ?? null,
         p_credit_limit_override: params.creditLimitOverride ?? null,
+        p_ai_draft_summary: params.aiDraftSummary ?? null,
       });
       if (error) throw error;
-      const rows = data as ContractRow[];
-      return toContract(rows[0]);
+      return toContract(data as ContractRow);
     },
 
     async listDueContractAlerts(businessId, asOf) {
@@ -312,8 +363,7 @@ export function createSupabaseLegalCommercialTransport(client: SupabaseClientLik
         p_alert_id: contractAlertId,
       });
       if (error) throw error;
-      const rows = data as ContractAlertRow[];
-      return toContractAlert(rows[0]);
+      return toContractAlert(data as ContractAlertRow);
     },
 
     async createEsignatureEnvelope(params) {
@@ -323,8 +373,7 @@ export function createSupabaseLegalCommercialTransport(client: SupabaseClientLik
         p_provider: params.provider ?? "generic",
       });
       if (error) throw error;
-      const rows = data as ESignatureEnvelopeRow[];
-      return toESignatureEnvelope(rows[0]);
+      return toESignatureEnvelope(data as ESignatureEnvelopeRow);
     },
 
     async markEsignatureEnvelopeViewed(envelopeId) {
@@ -332,8 +381,7 @@ export function createSupabaseLegalCommercialTransport(client: SupabaseClientLik
         p_envelope_id: envelopeId,
       });
       if (error) throw error;
-      const rows = data as ESignatureEnvelopeRow[];
-      return toESignatureEnvelope(rows[0]);
+      return toESignatureEnvelope(data as ESignatureEnvelopeRow);
     },
 
     async markEsignatureEnvelopeSigned(envelopeId, signedDocumentId) {
@@ -342,8 +390,7 @@ export function createSupabaseLegalCommercialTransport(client: SupabaseClientLik
         p_signed_document_id: signedDocumentId ?? null,
       });
       if (error) throw error;
-      const rows = data as ESignatureEnvelopeRow[];
-      return toESignatureEnvelope(rows[0]);
+      return toESignatureEnvelope(data as ESignatureEnvelopeRow);
     },
 
     async markEsignatureEnvelopeDeclined(envelopeId) {
@@ -351,8 +398,19 @@ export function createSupabaseLegalCommercialTransport(client: SupabaseClientLik
         p_envelope_id: envelopeId,
       });
       if (error) throw error;
-      const rows = data as ESignatureEnvelopeRow[];
-      return toESignatureEnvelope(rows[0]);
+      return toESignatureEnvelope(data as ESignatureEnvelopeRow);
+    },
+
+    async createEsignatureRequestDraft(params) {
+      const { data, error } = await client.rpc("create_esignature_request_draft", {
+        p_business_id: params.businessId,
+        p_contract_id: params.contractId ?? null,
+        p_quotation_id: params.quotationId ?? null,
+        p_provider: params.provider ?? "generic",
+        p_ai_draft_summary: params.aiDraftSummary ?? null,
+      });
+      if (error) throw error;
+      return toESignatureRequest(data as ESignatureRequestRow);
     },
 
     async convertQuotationToInvoice(quotationId) {
@@ -360,8 +418,7 @@ export function createSupabaseLegalCommercialTransport(client: SupabaseClientLik
         p_quotation_id: quotationId,
       });
       if (error) throw error;
-      const rows = data as InvoiceRow[];
-      return rows[0];
+      return data as InvoiceRow;
     },
 
     async convertQuotationToInvoiceWithCreditOverride(quotationId, reason) {
@@ -370,8 +427,7 @@ export function createSupabaseLegalCommercialTransport(client: SupabaseClientLik
         p_override_reason: reason ?? null,
       });
       if (error) throw error;
-      const rows = data as InvoiceRow[];
-      return rows[0];
+      return data as InvoiceRow;
     },
   };
 }

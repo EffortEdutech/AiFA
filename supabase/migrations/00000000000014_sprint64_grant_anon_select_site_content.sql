@@ -1,0 +1,12 @@
+-- Sprint 64 follow-up -- discovered live while regression-testing the
+-- "Anyone can read published site content" RLS policy.
+--
+-- This schema's own established convention (00000000000001_grant_
+-- authenticated_select.sql's own comment) is that RLS and GRANT are two
+-- independent Postgres layers -- a correct RLS policy with no table
+-- GRANT still fails closed with "permission denied", exactly what this
+-- sprint's own live test just hit for the anon role. public_site_content
+-- is deliberately public-readable by design (Architecture §2.3), so both
+-- anon and authenticated need the SELECT grant this table's RLS policy
+-- already intends to allow.
+grant select on public.public_site_content to anon, authenticated;

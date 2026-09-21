@@ -92,6 +92,30 @@ export async function sendReviewedDemotedOutbox(
 
 export class ActivationRejectedError extends Error {}
 
+/**
+ * Sprint 50 bugfix -- mirrors app/src/db/syncService.ts's own
+ * describeThrown, added the same sprint: the Supabase/PostgREST client
+ * rejects RPC calls with a plain `{ message, details, hint, code }`
+ * object, NOT an `Error` instance (`err instanceof Error` is false for
+ * it). The two callers below used to fall through to `String(err)` in
+ * that case, which stringifies a plain object as the literal text
+ * "[object Object]" -- confirmed live this sprint: clicking "Make this
+ * device active" in ReadOnlyBanner.tsx surfaced that exact text instead
+ * of the real message (e.g. "device_not_registered_or_revoked").
+ */
+export function describeThrown(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (
+    err !== null &&
+    typeof err === "object" &&
+    "message" in err &&
+    typeof (err as { message: unknown }).message === "string"
+  ) {
+    return (err as { message: string }).message;
+  }
+  return String(err);
+}
+
 /** Mirrors app/src/db/syncService.ts's requestActivation — see that file's own doc for the full Vol 12_1 §6a.1-6a.2 reasoning, identical here. */
 export async function requestActivation(
   db: SqlDb,
@@ -114,7 +138,7 @@ export async function requestActivation(
     );
   } catch (err) {
     throw new ActivationRejectedError(
-      err instanceof Error ? err.message : String(err),
+      describeThrown(err),
     );
   }
 
@@ -154,7 +178,7 @@ export async function requestPrimaryTakeover(
     );
   } catch (err) {
     throw new ActivationRejectedError(
-      err instanceof Error ? err.message : String(err),
+      describeThrown(err),
     );
   }
 

@@ -21,6 +21,17 @@
  * signed-out/no-Gateway-configured fallback for classify()/
  * answerFinancialQuestion() too.
  *
+ * Sprint 55 (Universal Media & Voice Intake Foundation): extractExpenseFromImage
+ * now also accepts kind: "pdf" (a real Anthropic Messages API capability —
+ * a "document" content block, distinct from "image"). Like every other
+ * call in this file, this is NOT exercised by the test suite (needs a real
+ * network call and a real API key) — verify PDF extraction against a real
+ * forwarded invoice before relying on it. transcribeAudio is deliberately
+ * NOT implemented here: Claude has no raw-audio-input capability in this
+ * codebase's provider model, so voice notes stay in the honest
+ * "not configured" state on this provider until a real speech-to-text
+ * vendor is chosen (see types.ts's AiProvider.transcribeAudio comment).
+ *
  * Prompt construction and response parsing now live in promptBuilders.ts
  * (shared with gatewayProvider.ts) — this file no longer defines its own
  * copies.
@@ -48,10 +59,14 @@ const DEFAULT_MODEL = "claude-sonnet-4-5";
 // logged" requirement — directional for tuning the confidence thresholds
 // against real usage, not billing-accurate. Override via env if needed.
 const DEFAULT_INPUT_COST_PER_1K_USD = Number(
-  process.env.EXPO_PUBLIC_AI_INPUT_COST_PER_1K ?? "0.003",
+  (typeof process !== "undefined"
+    ? process.env.EXPO_PUBLIC_AI_INPUT_COST_PER_1K
+    : undefined) ?? "0.003",
 );
 const DEFAULT_OUTPUT_COST_PER_1K_USD = Number(
-  process.env.EXPO_PUBLIC_AI_OUTPUT_COST_PER_1K ?? "0.015",
+  (typeof process !== "undefined"
+    ? process.env.EXPO_PUBLIC_AI_OUTPUT_COST_PER_1K
+    : undefined) ?? "0.015",
 );
 
 /**
@@ -66,7 +81,11 @@ export class AnthropicExpenseProvider implements AiProvider {
   private readonly model: string;
 
   constructor(options?: { apiKey?: string; model?: string }) {
-    const apiKey = options?.apiKey ?? process.env.EXPO_PUBLIC_AI_API_KEY;
+    const apiKey =
+      options?.apiKey ??
+      (typeof process !== "undefined"
+        ? process.env.EXPO_PUBLIC_AI_API_KEY
+        : undefined);
     if (!apiKey) {
       throw new Error(
         "Missing AI provider API key. Set EXPO_PUBLIC_AI_API_KEY in your local .env (see .env.example) before using AnthropicExpenseProvider. This is never inferred or fetched automatically — see the project's operating protocol.",
@@ -74,7 +93,11 @@ export class AnthropicExpenseProvider implements AiProvider {
     }
     this.apiKey = apiKey;
     this.model =
-      options?.model ?? process.env.EXPO_PUBLIC_AI_MODEL ?? DEFAULT_MODEL;
+      options?.model ??
+      (typeof process !== "undefined"
+        ? process.env.EXPO_PUBLIC_AI_MODEL
+        : undefined) ??
+      DEFAULT_MODEL;
   }
 
   async classify(pcb: ProfessionalContextBundle) {
@@ -125,6 +148,32 @@ export class AnthropicExpenseProvider implements AiProvider {
   async extractExpenseFromImage(input: VisionExtractionInput) {
     const startedAt = Date.now();
 
+    // Sprint 55: Anthropic's real Messages API uses a different content-
+    // block `type` for a PDF ("document") than for a raster image
+    // ("image") — sending a PDF's bytes under an `image` block (the ONLY
+    // branch this method had through Sprint 54) is rejected by the real
+    // API, not silently degraded. `kind` defaults to "image" so every
+    // existing photo-capture call site (Sprint 5/6, never set this field)
+    // is completely unaffected by this branch's addition.
+    const contentBlock =
+      input.kind === "pdf"
+        ? {
+            type: "document",
+            source: {
+              type: "base64",
+              media_type: input.mimeType,
+              data: input.base64Image,
+            },
+          }
+        : {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: input.mimeType,
+              data: input.base64Image,
+            },
+          };
+
     const response = await fetch(API_URL, {
       method: "POST",
       headers: {
@@ -139,14 +188,7 @@ export class AnthropicExpenseProvider implements AiProvider {
           {
             role: "user",
             content: [
-              {
-                type: "image",
-                source: {
-                  type: "base64",
-                  media_type: input.mimeType,
-                  data: input.base64Image,
-                },
-              },
+              contentBlock,
               { type: "text", text: buildVisionPrompt() },
             ],
           },

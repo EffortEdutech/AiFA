@@ -1,0 +1,62 @@
+/**
+ * Corporate design tokens — Sprint 37 (Vol 12_2 §7.1).
+ *
+ * These are the PROPOSED defaults from Vol 12_2 §7.1, not a confirmed
+ * owner decision (see that section's own Open Item note) -- deliberately
+ * cheap to change: every consumer below reads a CSS custom property, so
+ * revising a value here is a one-line change with zero structural
+ * rework anywhere else in the shell.
+ */
+:root {
+  /* Primary -- deep slate-navy family (Vol 12_2 §7.1) */
+  --aifa-primary-900: #0F172A;
+  --aifa-primary-800: #1E293B;
+  --aifa-primary-700: #334155;
+  --aifa-primary-100: #E2E8F0;
+  --aifa-primary-50: #F1F5F9;
+
+  /* Single restrained accent -- used only for primary actions / active state */
+  --aifa-accent: #2563EB;
+  --aifa-accent-contrast: #FFFFFF;
+
+  /* Form-control background -- owner request (2026-09-03): buttons,
+     inputs, selects, and textareas use this gold fill instead of the
+     plain white surface. Text stays --aifa-text (near-black) for
+     contrast against it; --aifa-form-gold-hover is a touch deeper for
+     hover/pressed states. */
+  --aifa-form-gold: #F0C419;
+  --aifa-form-gold-hover: #DDB015;
+  --aifa-form-gold-disabled: #F5E5A8;
+
+  /* Semantic colours -- status pills only, never general chrome */
+  --aifa-success: #15803D;
+  --aifa-success-bg: #DCFCE7;
+  --aifa-warning: #B45309;
+  --aifa-warning-bg: #FEF3C7;
+  --aifa-danger: #B3261E;
+  --aifa-danger-bg: #FEE2E2;
+
+  /* Neutrals */
+  --aifa-bg: #F7F7F8;
+  --aifa-surface: #FFFFFF;
+  --aifa-border: #E2E2E5;
+  --aifa-text: #1A1A1A;
+  --aifa-text-muted: #666666;
+
+  /* Typography -- system stack, corporate-dashboard scale */
+  --aifa-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --aifa-font-size-body: 14px;
+  --aifa-font-size-table: 13px;
+
+  /* Sidebar */
+  --aifa-sidebar-width: 240px;
+  --aifa-sidebar-width-collapsed: 56px;
+  --aifa-topbar-height: 52px;
+}
+
+/* Dark-scheme placeholder: this app currently pins a light body
+   background (see index.css) -- reserved here so a future dark-mode
+   pass has a single place to redefine the tokens above, matching how
+   Artifact-published pages structure their light/dark token split. Not
+   activated in Sprint 37 -- no dark-mode requirement has been stated by
+   the owner. */

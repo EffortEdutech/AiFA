@@ -118,15 +118,15 @@ export interface SstRate {
   ruleVersion: string | null;
 }
 
-function toSstRate(row: SstRateRow): SstRate {
-  return {
-    sstCode: row.sst_code,
-    taxType: row.tax_type,
-    rate: row.rate,
-    description: row.description,
-    ruleVersion: row.rule_version,
-  };
-}
+// NOTE (found & fixed Sprint 44): this file has no `listSstRates`-style
+// RPC of its own -- sst_rates reads go through direct table access from
+// web/src/lib/einvoiceSst.ts, the same "no list RPC" pattern every other
+// module this phase uses. A `toSstRate` converter was defined here in
+// Sprint 33 but never called by anything in this file (dead code, only
+// surfaced once Sprint 44 first imported this module and tsc's
+// noUnusedLocals caught it) -- removed rather than left in place; the lib
+// helper that actually needs it keeps its own copy, matching every
+// sibling lib/*.ts file's own convention of owning its row->model mapper.
 
 /** Row shape of public.sst_transactions. */
 export interface SstTransactionRow {
@@ -361,8 +361,7 @@ export function createSupabaseEInvoiceSstTransport(
         p_invoice_id: params.invoiceId,
       });
       if (error) throw error;
-      const rows = data as EInvoiceSubmissionRow[];
-      return toEInvoiceSubmission(rows[0]);
+      return toEInvoiceSubmission(data as EInvoiceSubmissionRow);
     },
 
     async generateConsolidatedBatch(params) {
@@ -371,8 +370,7 @@ export function createSupabaseEInvoiceSstTransport(
         p_consolidated_period: params.consolidatedPeriod,
       });
       if (error) throw error;
-      const rows = data as EInvoiceSubmissionRow[];
-      return toEInvoiceSubmission(rows[0]);
+      return toEInvoiceSubmission(data as EInvoiceSubmissionRow);
     },
 
     async submitEinvoice(submissionId) {
@@ -380,8 +378,7 @@ export function createSupabaseEInvoiceSstTransport(
         p_submission_id: submissionId,
       });
       if (error) throw error;
-      const rows = data as EInvoiceSubmissionRow[];
-      return toEInvoiceSubmission(rows[0]);
+      return toEInvoiceSubmission(data as EInvoiceSubmissionRow);
     },
 
     async recordSubmissionResult(params) {
@@ -393,8 +390,7 @@ export function createSupabaseEInvoiceSstTransport(
         p_irb_response_ref: params.irbResponseRef ?? null,
       });
       if (error) throw error;
-      const rows = data as EInvoiceSubmissionRow[];
-      return toEInvoiceSubmission(rows[0]);
+      return toEInvoiceSubmission(data as EInvoiceSubmissionRow);
     },
 
     async computeSstForInvoice(invoiceId) {
@@ -410,8 +406,7 @@ export function createSupabaseEInvoiceSstTransport(
         p_payment_voucher_id: paymentVoucherId,
       });
       if (error) throw error;
-      const rows = data as SstTransactionRow[];
-      return toSstTransaction(rows[0]);
+      return toSstTransaction(data as SstTransactionRow);
     },
 
     async createSstReturn(params) {
@@ -420,8 +415,7 @@ export function createSupabaseEInvoiceSstTransport(
         p_period: params.period,
       });
       if (error) throw error;
-      const rows = data as SstReturnRow[];
-      return toSstReturn(rows[0]);
+      return toSstReturn(data as SstReturnRow);
     },
 
     async submitSstReturn(sstReturnId) {
@@ -429,8 +423,7 @@ export function createSupabaseEInvoiceSstTransport(
         p_sst_return_id: sstReturnId,
       });
       if (error) throw error;
-      const rows = data as SstReturnRow[];
-      return toSstReturn(rows[0]);
+      return toSstReturn(data as SstReturnRow);
     },
   };
 }

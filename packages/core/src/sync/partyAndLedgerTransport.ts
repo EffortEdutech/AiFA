@@ -242,6 +242,22 @@ export interface SupabasePartyAndLedgerTransport {
     creditTermsDays?: number | null;
   }): Promise<Party>;
 
+  /**
+   * Sprint 58 (Phase 5, 14 September 2026) — resolves an AI-extracted
+   * counterparty NAME (Sprint 57's `classifyDomain()` only ever
+   * returns a name string, never a party id) to an existing party, or
+   * creates one if no match exists. Same capture gate as `createParty`
+   * above (no new capability surface). Match is case-insensitive on
+   * `displayName` and requires the existing party to share at least
+   * one of `partyTypes`, so a same-named customer is never silently
+   * reused as a supplier or vice versa.
+   */
+  findOrCreateParty(params: {
+    businessId: string;
+    displayName: string;
+    partyTypes: PartyType[];
+  }): Promise<Party>;
+
   /** Vol 13_0 §3.4 — the shared numbering mechanism every document-issuing module reuses; `documentType` is any module-defined string (e.g. 'invoice', 'quotation'). Auto-provisions a sequence with a sensible default prefix on first use if `configureDocumentSequence` was never called for this type. */
   nextDocumentNumber(businessId: string, documentType: string): Promise<string>;
 
@@ -301,6 +317,16 @@ export function createSupabasePartyAndLedgerTransport(
         p_billing_address: params.billingAddress ?? null,
         p_credit_limit: params.creditLimit ?? null,
         p_credit_terms_days: params.creditTermsDays ?? null,
+      });
+      if (error) throw error;
+      return toParty(data as PartyRow);
+    },
+
+    async findOrCreateParty(params) {
+      const { data, error } = await client.rpc("find_or_create_party", {
+        p_business_id: params.businessId,
+        p_display_name: params.displayName,
+        p_party_types: params.partyTypes,
       });
       if (error) throw error;
       return toParty(data as PartyRow);

@@ -1,5 +1,17 @@
+@import "./shell/tokens.css";
+
 :root {
-  color-scheme: light dark;
+  /* Pinned to light -- this app has never implemented a dark theme
+     (see tokens.css's own "Dark-scheme placeholder" note). Previously
+     this was `light dark`, which let the browser apply its native
+     dark-mode form-control chrome -- black/near-black backgrounds with
+     low-contrast grey text -- to every unstyled input/select/textarea
+     whenever the OS or browser was itself in dark mode, independently
+     of this file's own (light-only) button/input styling below. Pinning
+     to `light` stops the browser from doing that; the explicit
+     background/color rules below are the actual fix for readability,
+     this line just stops the browser from overriding them. */
+  color-scheme: light;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 body {
@@ -11,9 +23,30 @@ body {
 button {
   font: inherit;
   cursor: pointer;
+  color: var(--aifa-text);
+  background: var(--aifa-form-gold);
+  border: 1px solid var(--aifa-border);
+  border-radius: 6px;
+  padding: 6px 12px;
+}
+button:hover { background: var(--aifa-form-gold-hover); }
+button:disabled { opacity: 0.55; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--aifa-accent);
+  outline-offset: 1px;
 }
 input, select, textarea {
   font: inherit;
+  background: var(--aifa-form-gold);
+  color: var(--aifa-text);
+  border: 1px solid var(--aifa-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+input::placeholder, textarea::placeholder { color: var(--aifa-text-muted); opacity: 1; }
+input:disabled, select:disabled, textarea:disabled {
+  background: var(--aifa-form-gold-disabled);
+  color: var(--aifa-text-muted);
 }
 .card {
   background: #fff;
@@ -36,3 +69,136 @@ input, select, textarea {
   border-bottom-color: #1a1a1a;
   font-weight: 600;
 }
+
+/* ===== Sprint 37 shell (Vol 12_2) ===== */
+
+body { font-family: var(--aifa-font); font-size: var(--aifa-font-size-body); }
+
+.aifa-shell { display: flex; flex-direction: column; height: 100vh; }
+
+.aifa-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--aifa-topbar-height);
+  padding: 0 16px;
+  background: var(--aifa-primary-900);
+  color: #fff;
+  flex-shrink: 0;
+}
+.aifa-hamburger {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #fff;
+  padding: 4px 8px;
+}
+.aifa-topbar-title { font-weight: 600; }
+.aifa-topbar-spacer { flex: 1; }
+.aifa-topbar-icon-btn {
+  background: none;
+  border: none;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+.aifa-topbar-icon-btn:hover { background: var(--aifa-primary-800); }
+.aifa-active-device-pill {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--aifa-primary-800);
+  color: var(--aifa-primary-100);
+}
+.aifa-active-device-pill--active {
+  background: var(--aifa-success-bg);
+  color: var(--aifa-success);
+}
+
+.aifa-shell-body { display: flex; flex: 1; min-height: 0; }
+
+.aifa-sidebar {
+  width: var(--aifa-sidebar-width);
+  flex-shrink: 0;
+  background: var(--aifa-primary-50);
+  border-right: 1px solid var(--aifa-border);
+  overflow-y: auto;
+  padding: 12px 0;
+  transition: width 0.15s ease;
+}
+.aifa-sidebar--collapsed { width: var(--aifa-sidebar-width-collapsed); }
+.aifa-sidebar-section { margin-bottom: 14px; }
+.aifa-sidebar-section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--aifa-text-muted);
+  padding: 4px 16px;
+}
+.aifa-sidebar-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-left: 3px solid transparent;
+  padding: 8px 16px;
+  font-size: 14px;
+  color: var(--aifa-text);
+}
+.aifa-sidebar-item:hover { background: var(--aifa-primary-100); }
+.aifa-sidebar-item--active {
+  border-left-color: var(--aifa-accent);
+  color: var(--aifa-accent);
+  font-weight: 600;
+  background: var(--aifa-primary-100);
+}
+
+.aifa-content { flex: 1; overflow-y: auto; padding: 24px; }
+.aifa-page { max-width: 960px; }
+.aifa-page h1 { font-size: 20px; margin-top: 0; }
+
+.aifa-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--aifa-border); margin: 16px 0; }
+.aifa-tabs button {
+  background: none;
+  border: none;
+  padding: 10px 16px;
+  border-bottom: 2px solid transparent;
+  color: var(--aifa-text);
+}
+.aifa-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--aifa-accent);
+  color: var(--aifa-accent);
+  font-weight: 600;
+}
+.aifa-tab-count {
+  margin-left: 6px;
+  font-size: 11px;
+  background: var(--aifa-primary-100);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+.aifa-workspace-slideover {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(420px, 100vw);
+  background: var(--aifa-surface);
+  border-left: 1px solid var(--aifa-border);
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+}
+.aifa-workspace-slideover-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--aifa-border);
+  font-weight: 600;
+}
+.aifa-workspace-slideover-header button { background: none; border: none; font-size: 16px; }
+.aifa-workspace-slideover-body { flex: 1; overflow-y: auto; padding: 16px; }

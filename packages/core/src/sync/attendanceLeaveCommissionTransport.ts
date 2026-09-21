@@ -49,8 +49,11 @@ export type AttendanceSource = "mobile_app" | "manual_admin_entry";
 export type OvertimeStatus = "draft" | "approved" | "synced_to_payroll";
 export type LeaveApplicationStatus = "pending_approval" | "approved" | "rejected";
 export type CommissionBasis = "percent_of_invoice" | "percent_of_margin" | "flat_per_unit";
-export type CommissionCalculationStatus = "computed" | "approved" | "paid";
+/** 'drafted' added Sprint 59 for a manual/ad hoc commission (see createManualCommissionDraft) — every rule-computed row from computeCommissionForInvoice still starts at 'computed'. */
+export type CommissionCalculationStatus = "drafted" | "computed" | "approved" | "paid";
 export type CommissionTriggerStatus = "issued" | "paid";
+/** Sprint 59. Mirrors LeaveApplicationStatus's 'pending_approval' → resolved shape, but named 'drafted' to match every other Bridge II domain's own status vocabulary. */
+export type AttendanceCorrectionStatus = "drafted" | "approved" | "rejected";
 
 /** Row shape of public.attendance_records. */
 export interface AttendanceRecordRow {
@@ -226,6 +229,51 @@ function toLeaveApplication(row: LeaveApplicationRow): LeaveApplication {
   };
 }
 
+/** Row shape of public.attendance_corrections (Sprint 59). A proposed fix to the attendance ledger — approval inserts a real AttendanceRecord via source = 'manual_admin_entry'; rejection just marks this row rejected. */
+export interface AttendanceCorrectionRow {
+  id: string;
+  business_id: string;
+  employee_party_id: string;
+  clock_type: ClockType;
+  corrected_at: string;
+  reason: string | null;
+  status: AttendanceCorrectionStatus;
+  captured_by_membership_id: string | null;
+  decided_by_membership_id: string | null;
+  created_attendance_record_id: string | null;
+  created_at: string;
+}
+
+export interface AttendanceCorrection {
+  id: string;
+  businessId: string;
+  employeePartyId: string;
+  clockType: ClockType;
+  correctedAt: string;
+  reason: string | null;
+  status: AttendanceCorrectionStatus;
+  capturedByMembershipId: string | null;
+  decidedByMembershipId: string | null;
+  createdAttendanceRecordId: string | null;
+  createdAt: string;
+}
+
+function toAttendanceCorrection(row: AttendanceCorrectionRow): AttendanceCorrection {
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    employeePartyId: row.employee_party_id,
+    clockType: row.clock_type,
+    correctedAt: row.corrected_at,
+    reason: row.reason,
+    status: row.status,
+    capturedByMembershipId: row.captured_by_membership_id,
+    decidedByMembershipId: row.decided_by_membership_id,
+    createdAttendanceRecordId: row.created_attendance_record_id,
+    createdAt: row.created_at,
+  };
+}
+
 /** Row shape of public.commission_rules. */
 export interface CommissionRuleRow {
   id: string;
@@ -260,13 +308,13 @@ function toCommissionRule(row: CommissionRuleRow): CommissionRule {
   };
 }
 
-/** Row shape of public.commission_calculations. */
+/** Row shape of public.commission_calculations. invoice_id/commission_rule_id are null for a Sprint 59 manual/ad hoc draft (see createManualCommissionDraft) — always set for a rule-computed row from computeCommissionForInvoice. */
 export interface CommissionCalculationRow {
   id: string;
   business_id: string;
-  invoice_id: string;
+  invoice_id: string | null;
   agent_party_id: string;
-  commission_rule_id: string;
+  commission_rule_id: string | null;
   amount: number;
   status: CommissionCalculationStatus;
   created_at: string;
@@ -275,9 +323,9 @@ export interface CommissionCalculationRow {
 export interface CommissionCalculation {
   id: string;
   businessId: string;
-  invoiceId: string;
+  invoiceId: string | null;
   agentPartyId: string;
-  commissionRuleId: string;
+  commissionRuleId: string | null;
   amount: number;
   status: CommissionCalculationStatus;
   createdAt: string;
@@ -355,13 +403,14 @@ export interface SupabaseAttendanceLeaveCommissionTransport {
     entitledDays?: number | null;
   }): Promise<LeaveBalance>;
 
-  /** `capture` on `hr_attendance_leave`. Submits a leave application, opening its own ApprovalTask. Throws `insufficient_leave_balance` if the requested (inclusive) day count exceeds what remains for that employee/type/year. Balance is NOT deducted here — only on approval. */
+  /** `capture` on `hr_attendance_leave`. Submits a leave application, opening its own ApprovalTask. Throws `insufficient_leave_balance` if the requested (inclusive) day count exceeds what remains for that employee/type/year. Balance is NOT deducted here — only on approval. `aiDraftSummary` (Sprint 53, Vol 5_5) is optional free text the Quick Capture router captured before the owner resolved it into this structured call — passed straight through to the RPC's existing `p_ai_draft_summary` param (Sprint 35's own signature; nothing populated it with a real value until now). */
   createLeaveApplication(params: {
     businessId: string;
     employeePartyId: string;
     leaveTypeId: string;
     startDate: string;
     endDate: string;
+    aiDraftSummary?: string | null;
   }): Promise<LeaveApplication>;
 
   /** `configure` on `commission`. Defines a commission rule — either agent-specific (`appliesToPartyId` set) or the business-wide default (omitted/null), used as the fallback for an agent with no rule of their own. */
@@ -376,8 +425,27 @@ export interface SupabaseAttendanceLeaveCommissionTransport {
   /** `capture` on `commission`. Computes and opens an ApprovalTask for a CommissionCalculation on an invoice, resolving the agent-specific rule first and the business-wide default rule as fallback. Throws if the invoice hasn't reached the business's configured `commissionTriggerStatus`, has no assigned agent, has already been computed, or no rule (specific or default) exists. Call this explicitly right after the action that moves the invoice to the configured trigger status — there is no automatic database trigger. */
   computeCommissionForInvoice(invoiceId: string): Promise<CommissionCalculation>;
 
+  /** `capture` on `commission`. Sprint 59. Drafts a manual/ad hoc commission (a flat stated amount, not derived from an invoice or a configured rule) and opens its own ApprovalTask — for the case the capture router can't resolve a real invoice to run computeCommissionForInvoice against. `aiDraftSummary` is passed straight through to the RPC, same convention as createLeaveApplication. */
+  createManualCommissionDraft(params: {
+    businessId: string;
+    agentPartyId: string;
+    amount: number;
+    notes?: string | null;
+    aiDraftSummary?: string | null;
+  }): Promise<CommissionCalculation>;
+
   /** `capture` on `commission`. Marks an 'approved' CommissionCalculation as 'paid'. Throws if not yet approved. */
   markCommissionPaid(commissionCalculationId: string): Promise<CommissionCalculation>;
+
+  /** `capture` on `hr_attendance_leave`. Sprint 59. Drafts a proposed fix to the attendance ledger (a missed clock-in/out, or a correction to one already recorded) and opens its own ApprovalTask. This is one of Sprint 61's five permanently-approval-gated domains — never auto-approved by the capture router regardless of AI confidence. On approval, a real AttendanceRecord is inserted with `source: 'manual_admin_entry'`, bypassing createAttendanceRecord's own consecutive-same-type check (a correction is explicitly fixing a gap or out-of-sequence record). */
+  createAttendanceCorrection(params: {
+    businessId: string;
+    employeePartyId: string;
+    clockType: ClockType;
+    correctedAt: string;
+    reason?: string | null;
+    aiDraftSummary?: string | null;
+  }): Promise<AttendanceCorrection>;
 
   /** `view` on `accounting_reports`. Read-only revenue-vs-payroll-vs-commission-cost summary for a date range — no new storage, the functional minimum this sprint's own plan names. Payroll cost sums PayrollRuns whose period falls in the requested range and whose status is 'approved' or 'paid'; commission cost sums CommissionCalculations computed in range with the same two statuses. */
   revenueVsCostDashboard(businessId: string, dateFrom: string, dateTo: string): Promise<RevenueVsCostDashboard>;
@@ -407,8 +475,7 @@ export function createSupabaseAttendanceLeaveCommissionTransport(
         p_source: params.source ?? "mobile_app",
       });
       if (error) throw error;
-      const rows = data as AttendanceRecordRow[];
-      return toAttendanceRecord(rows[0]);
+      return toAttendanceRecord(data as AttendanceRecordRow);
     },
 
     async deriveOvertimeForDate(params) {
@@ -419,8 +486,7 @@ export function createSupabaseAttendanceLeaveCommissionTransport(
         p_scheduled_hours: params.scheduledHours ?? 8,
       });
       if (error) throw error;
-      const rows = data as OvertimeRecordRow[];
-      return toOvertimeRecord(rows[0]);
+      return toOvertimeRecord(data as OvertimeRecordRow);
     },
 
     async createLeaveType(params) {
@@ -430,8 +496,7 @@ export function createSupabaseAttendanceLeaveCommissionTransport(
         p_default_entitlement_days: params.defaultEntitlementDays,
       });
       if (error) throw error;
-      const rows = data as LeaveTypeRow[];
-      return toLeaveType(rows[0]);
+      return toLeaveType(data as LeaveTypeRow);
     },
 
     async grantLeaveBalance(params) {
@@ -442,8 +507,7 @@ export function createSupabaseAttendanceLeaveCommissionTransport(
         p_entitled_days: params.entitledDays ?? null,
       });
       if (error) throw error;
-      const rows = data as LeaveBalanceRow[];
-      return toLeaveBalance(rows[0]);
+      return toLeaveBalance(data as LeaveBalanceRow);
     },
 
     async createLeaveApplication(params) {
@@ -453,10 +517,10 @@ export function createSupabaseAttendanceLeaveCommissionTransport(
         p_leave_type_id: params.leaveTypeId,
         p_start_date: params.startDate,
         p_end_date: params.endDate,
+        p_ai_draft_summary: params.aiDraftSummary ?? null,
       });
       if (error) throw error;
-      const rows = data as LeaveApplicationRow[];
-      return toLeaveApplication(rows[0]);
+      return toLeaveApplication(data as LeaveApplicationRow);
     },
 
     async createCommissionRule(params) {
@@ -468,8 +532,7 @@ export function createSupabaseAttendanceLeaveCommissionTransport(
         p_product_scope: params.productScope ?? null,
       });
       if (error) throw error;
-      const rows = data as CommissionRuleRow[];
-      return toCommissionRule(rows[0]);
+      return toCommissionRule(data as CommissionRuleRow);
     },
 
     async computeCommissionForInvoice(invoiceId) {
@@ -477,8 +540,19 @@ export function createSupabaseAttendanceLeaveCommissionTransport(
         p_invoice_id: invoiceId,
       });
       if (error) throw error;
-      const rows = data as CommissionCalculationRow[];
-      return toCommissionCalculation(rows[0]);
+      return toCommissionCalculation(data as CommissionCalculationRow);
+    },
+
+    async createManualCommissionDraft(params) {
+      const { data, error } = await client.rpc("create_manual_commission_draft", {
+        p_business_id: params.businessId,
+        p_agent_party_id: params.agentPartyId,
+        p_amount: params.amount,
+        p_notes: params.notes ?? null,
+        p_ai_draft_summary: params.aiDraftSummary ?? null,
+      });
+      if (error) throw error;
+      return toCommissionCalculation(data as CommissionCalculationRow);
     },
 
     async markCommissionPaid(commissionCalculationId) {
@@ -486,8 +560,20 @@ export function createSupabaseAttendanceLeaveCommissionTransport(
         p_commission_calculation_id: commissionCalculationId,
       });
       if (error) throw error;
-      const rows = data as CommissionCalculationRow[];
-      return toCommissionCalculation(rows[0]);
+      return toCommissionCalculation(data as CommissionCalculationRow);
+    },
+
+    async createAttendanceCorrection(params) {
+      const { data, error } = await client.rpc("create_attendance_correction", {
+        p_business_id: params.businessId,
+        p_employee_party_id: params.employeePartyId,
+        p_clock_type: params.clockType,
+        p_corrected_at: params.correctedAt,
+        p_reason: params.reason ?? null,
+        p_ai_draft_summary: params.aiDraftSummary ?? null,
+      });
+      if (error) throw error;
+      return toAttendanceCorrection(data as AttendanceCorrectionRow);
     },
 
     async revenueVsCostDashboard(businessId, dateFrom, dateTo) {

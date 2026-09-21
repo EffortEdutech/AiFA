@@ -112,6 +112,30 @@ export async function sendReviewedDemotedOutbox(
 export class ActivationRejectedError extends Error {}
 
 /**
+ * Sprint 50 bugfix -- the Supabase/PostgREST client rejects RPC calls with
+ * a plain `{ message, details, hint, code }` object, NOT an `Error`
+ * instance (`err instanceof Error` is false for it). The two callers below
+ * used to fall through to `String(err)` in that case, which stringifies a
+ * plain object as the literal text "[object Object]" -- confirmed live
+ * this sprint via the read-only banner showing that exact text instead of
+ * e.g. "device_not_registered_or_revoked". This pulls the real `.message`
+ * out of that shape before falling back to `String(err)` for anything else
+ * (a thrown string, undefined, etc).
+ */
+function describeThrown(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (
+    err !== null &&
+    typeof err === "object" &&
+    "message" in err &&
+    typeof (err as { message: unknown }).message === "string"
+  ) {
+    return (err as { message: string }).message;
+  }
+  return String(err);
+}
+
+/**
  * Sprint 16 (Vol 12_1 Section 6a.1-6a.2, minimal wiring). Requests that
  * THIS device become the active device — a device can only ever request
  * activation for itself (never "push" another device active, per Section
@@ -140,7 +164,7 @@ export async function requestActivation(
     );
   } catch (err) {
     throw new ActivationRejectedError(
-      err instanceof Error ? err.message : String(err),
+      describeThrown(err),
     );
   }
 
@@ -186,7 +210,7 @@ export async function requestPrimaryTakeover(
     );
   } catch (err) {
     throw new ActivationRejectedError(
-      err instanceof Error ? err.message : String(err),
+      describeThrown(err),
     );
   }
 

@@ -5,7 +5,7 @@ import {
   runExpensePhotoInterpretation,
 } from "@aifa/core/ai/capturePipeline";
 import type {
-  BusinessDomain,
+  AiLedgerDomain,
   VisionExtractedFields,
 } from "@aifa/core/ai/types";
 import { recordBankTransaction } from "@aifa/core/db/bankingRepository";
@@ -86,13 +86,13 @@ type ManualOnlyDomainHint = Exclude<
   "expense" | "sale" | "purchase"
 >;
 
-const AI_INTERPRETED_DOMAINS: BusinessDomain[] = [
+const AI_INTERPRETED_DOMAINS: AiLedgerDomain[] = [
   "expense",
   "sale",
   "purchase",
 ];
 
-function isAiInterpretedDomain(hint: DomainHint): hint is BusinessDomain {
+function isAiInterpretedDomain(hint: DomainHint): hint is AiLedgerDomain {
   return (AI_INTERPRETED_DOMAINS as DomainHint[]).includes(hint);
 }
 

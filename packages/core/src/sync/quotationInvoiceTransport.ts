@@ -212,6 +212,20 @@ export interface SupabaseQuotationInvoiceTransport {
    * shortcut every other domain already uses (Vol 13_0 §3.3) — never
    * for payroll-adjacent flows, and this function does not itself
    * decide when that's appropriate.
+   *
+   * ALREADY-COMPLETED SALES (added 14 September 2026, per the owner's
+   * business-flow correction — see the migration's own header): pass
+   * `alreadyCompleted: true` when the captured input describes a sale
+   * that has already happened ("invoiced ABC Sdn Bhd RM500"), not a
+   * proposal to send. The created quotation's approval task is tagged
+   * onApprovalAction='issue invoice directly' instead of 'send
+   * WhatsApp'; on approval, `sync_direct_sale_invoice_on_task_decision`
+   * advances it straight to `accepted` (skipping `sent` — there is no
+   * customer to propose to) and immediately produces a real, issued
+   * Invoice via the existing Quotation->Invoice pipeline. It is still
+   * a reviewable draft first — approval is required either way, only
+   * what approval produces differs. Defaults to false so every
+   * existing caller (a normal, propose-first quotation) is unaffected.
    */
   createQuotation(params: {
     businessId: string;
@@ -221,6 +235,7 @@ export interface SupabaseQuotationInvoiceTransport {
     lines: QuotationLineInput[];
     aiDraftSummary?: string | null;
     autoApproved?: boolean;
+    alreadyCompleted?: boolean;
   }): Promise<Quotation>;
 
   /**
@@ -275,6 +290,7 @@ export function createSupabaseQuotationInvoiceTransport(
         })),
         p_ai_draft_summary: params.aiDraftSummary ?? null,
         p_auto_approved: params.autoApproved ?? false,
+        p_already_completed: params.alreadyCompleted ?? false,
       });
       if (error) throw error;
       return toQuotation(data as QuotationRow);

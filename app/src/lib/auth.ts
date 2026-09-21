@@ -1,17 +1,26 @@
 /**
- * Minimal Phase 1 authentication — Vol 8_1 Section 3 ("Account-level
- * authentication protects cloud backup, sync, and multi-device access"),
- * Vol 11_0 Section 5 ("Backend-provided email/OTP or social auth, single
- * user per business account"). Sprint 10 closes a gap carried since
- * Sprint 2: `backupService.ts` (Sprint 9) has required a signed-in
- * Supabase user since it was written, but no sign-in flow existed for a
- * real owner to ever reach that state.
+ * Phase 1 authentication — Vol 8_1 Section 3 ("Account-level
+ * authentication protects cloud backup, sync, and multi-device access").
+ * Originally built as email/OTP-only (Vol 11_0 Section 5's stated Phase 1
+ * choice, to avoid a password-reset flow). Switched to email+password
+ * 2026-09-07 at the owner's explicit request: the OTP flow depends on
+ * Supabase actually delivering an email with the numeric code embedded
+ * (not just a magic link), which requires the project's own custom SMTP +
+ * a custom email template -- real setup cost that blocked sign-in
+ * entirely on a fresh cloud project. Password auth needs no outbound
+ * email at all for the core sign-in path, so it has no such dependency.
  *
  * Deliberate scope decisions:
- * - Email/OTP only (no password field anywhere) -- avoids building and
- *   securing a password-reset flow in Phase 1, per Vol 11_0 Section 5's own
- *   stated Phase 1 choice and AGENTS.md's bias toward the smallest correct
- *   thing.
+ * - No separate password-reset flow yet (Vol 11_0 Section 5's original
+ *   concern) -- `resetPasswordForEmail` still depends on the same SMTP
+ *   setup that email/OTP needed, so it's deliberately not wired in this
+ *   pass. An owner who forgets their password has no self-serve recovery
+ *   yet; flagged here as a real, known gap rather than silently missing.
+ * - `signUp` and `signIn` are two explicit calls (unlike OTP's single
+ *   `shouldCreateUser: true` call) since Supabase's password API has no
+ *   equivalent implicit-create-on-sign-in shape -- the UI decides which
+ *   one to call based on whether the owner picked "Create account" or
+ *   "Sign in".
  * - This module is a thin wrapper around `supabase.auth`, the same
  *   native/network-bound shape as `backupService.ts` (Sprint 9) --
  *   real network calls to Supabase Auth are not exercisable in this
@@ -42,42 +51,50 @@ export interface AuthActionResult {
 }
 
 /**
- * Step 1 of email/OTP sign-in: asks Supabase to email a one-time code to
- * this address. `shouldCreateUser: true` means the same call covers both
- * first-time sign-up and returning sign-in -- Phase 1 has no separate
- * "create account" flow (Vol 11_0 Section 5's "single user per business
- * account" keeps this simple).
+ * Creates a new account with a password. On a project where email
+ * confirmation is required, Supabase returns success with no session yet
+ * (the caller must confirm by email first) -- surfaced to the UI as a
+ * distinct message rather than a silent no-op, since "created but not
+ * signed in" and "signed in" look identical from a plain ok:true check
+ * otherwise.
  */
-export async function requestOtp(email: string): Promise<AuthActionResult> {
-  const trimmed = email.trim();
-  if (!trimmed) {
-    return { ok: false, error: "Enter an email address." };
-  }
-  const { error } = await supabase.auth.signInWithOtp({
-    email: trimmed,
-    options: { shouldCreateUser: true },
-  });
-  return { ok: !error, error: error?.message ?? null };
-}
-
-/**
- * Step 2: verifies the code the owner received by email and, on success,
- * establishes a real Supabase session (persisted via the SecureStore
- * adapter configured in supabaseClient.ts).
- */
-export async function verifyOtp(
+export async function signUp(
   email: string,
-  token: string,
+  password: string,
 ): Promise<AuthActionResult> {
   const trimmed = email.trim();
-  const trimmedToken = token.trim();
-  if (!trimmed || !trimmedToken) {
-    return { ok: false, error: "Enter both the email and the code." };
+  if (!trimmed || !password) {
+    return { ok: false, error: "Enter both an email and a password." };
   }
-  const { error } = await supabase.auth.verifyOtp({
+  const { data, error } = await supabase.auth.signUp({
     email: trimmed,
-    token: trimmedToken,
-    type: "email",
+    password,
+  });
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  if (!data.session) {
+    return {
+      ok: true,
+      error:
+        "Account created. Check your email to confirm it before signing in.",
+    };
+  }
+  return { ok: true, error: null };
+}
+
+/** Signs in an existing owner with their email and password. */
+export async function signIn(
+  email: string,
+  password: string,
+): Promise<AuthActionResult> {
+  const trimmed = email.trim();
+  if (!trimmed || !password) {
+    return { ok: false, error: "Enter both an email and a password." };
+  }
+  const { error } = await supabase.auth.signInWithPassword({
+    email: trimmed,
+    password,
   });
   return { ok: !error, error: error?.message ?? null };
 }

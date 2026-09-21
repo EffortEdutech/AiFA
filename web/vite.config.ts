@@ -18,15 +18,35 @@ export default defineConfig({
       // Mirrors app/babel.config.js's module-resolver alias — @aifa/core
       // is consumed as TS source directly, no build step, same as mobile.
       "@aifa/core": path.resolve(__dirname, "../packages/core/src"),
+      // @aifa/core/src/sync/dek.ts imports @noble/* deep subpaths. Vite's
+      // Node resolution walks up from the IMPORTING file's own directory
+      // (packages/core/src/sync), which never reaches web/node_modules
+      // since there's no root-level node_modules in this non-workspaces
+      // monorepo. Mirrors app/package.json's jest moduleNameMapper fix
+      // for the identical problem in the mobile test runner.
+      "@noble/ciphers/aes.js": path.resolve(__dirname, "node_modules/@noble/ciphers/aes.js"),
+      "@noble/ciphers/utils.js": path.resolve(__dirname, "node_modules/@noble/ciphers/utils.js"),
+      "@noble/hashes/hkdf.js": path.resolve(__dirname, "node_modules/@noble/hashes/hkdf.js"),
+      "@noble/hashes/sha2.js": path.resolve(__dirname, "node_modules/@noble/hashes/sha2.js"),
+      "@noble/hashes/utils.js": path.resolve(__dirname, "node_modules/@noble/hashes/utils.js"),
     },
   },
+  // sql.js's dist build (sql-wasm-browser.js) is a CommonJS/UMD file
+  // (`module.exports = initSqlJs`), not a real ES module. Vite's dev
+  // server only rewrites CJS deps into a proper `export default` when
+  // they go through its esbuild dependency pre-bundling step
+  // (optimizeDeps) — a prior `exclude: ["sql.js"]` here skipped that,
+  // so the browser tried to load the raw CJS file as native ESM and
+  // failed with "does not provide an export named 'default'". `vite
+  // build` (Rollup + @rollup/plugin-commonjs) never hit this, which is
+  // why it went unnoticed until the dev server was actually run.
   optimizeDeps: {
-    exclude: ["sql.js"],
+    include: ["sql.js"],
   },
   build: {
     target: "es2022",
   },
   server: {
-    port: 4280,
+    port: 3070,
   },
 });

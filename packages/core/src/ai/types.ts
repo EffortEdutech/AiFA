@@ -10,11 +10,53 @@
  * Expense-specific names.
  */
 
-/** The three Phase 1 domains that go through AI classification. Banking (Sprint 7) is not included yet. */
-export type BusinessDomain = "expense" | "sale" | "purchase";
+/**
+ * Sprint 57 (Phase 5, 14 September 2026 revision — Vol_5_5 §7): widened from
+ * the original 5 values (expense/sale/purchase/leave_application/
+ * unclassified) to cover every domain the owner's full-module objective
+ * names. The new members below have NO Path B RPC or ledger-posting
+ * behaviour yet — Sprints 58-60 give each one a real destination
+ * (draft-then-approve, per those sprints' own scope); until then, a
+ * `classifyPathBIntake` result carrying one of them still lands in
+ * `unclassified`/Capture Triage exactly like any domain this codebase
+ * doesn't yet have a bridge for (see inputRouter.ts). Adding a domain
+ * literal here is deliberately decoupled from having somewhere for it to
+ * go — the alternative (only adding a domain the moment its bridge sprint
+ * ships) would mean Sprint 57's classifier can never be tested against the
+ * owner's real full domain list until every later sprint is already done.
+ */
+export type BusinessDomain =
+  | "expense"
+  | "sale"
+  | "purchase"
+  | "leave_application"
+  | "purchase_order"
+  | "delivery_order"
+  | "stock_adjustment"
+  | "commission"
+  | "attendance_correction"
+  | "e_invoice_flag"
+  | "contract_alert"
+  | "e_signature_request"
+  | "unclassified";
+
+/**
+ * Sprint 53 (Phase 5, Vol_5_5 §7): the ORIGINAL three-domain subset that
+ * actually goes through AI ledger classification (`capturePipeline.ts`'s
+ * `classifyAndRoute`, `pcb.ts`'s category lists). `leave_application` and
+ * `unclassified` are real `BusinessDomain` values the Universal Input
+ * Router (Vol_5_5) can detect, but neither has a chart-of-accounts
+ * category or a ledger posting — they are resolved through their own
+ * dedicated flow instead (see `inputRouter.ts` / `CaptureRouterPage.tsx`),
+ * never through `classifyAndRoute`. Kept as its own named type rather
+ * than inlining the three-way union everywhere it's needed, so a future
+ * domain addition to `BusinessDomain` doesn't silently need to also be
+ * ledger-classifiable to type-check.
+ */
+export type AiLedgerDomain = "expense" | "sale" | "purchase";
 
 export interface CapturePcbInput {
-  domain: BusinessDomain;
+  domain: AiLedgerDomain;
   businessEventId: string;
   businessDataId: string;
   description: string;
@@ -101,6 +143,40 @@ export interface VisionExtractionResult {
 export interface VisionExtractionInput {
   base64Image: string;
   mimeType: string;
+  /**
+   * Sprint 55 (Phase 5, Universal Media & Voice Intake Foundation) —
+   * defaults to "image" when omitted, matching every existing call site
+   * (Sprint 5/6's photo capture never set this field). "pdf" is new this
+   * sprint: a provider implementing this method must branch its own
+   * request-construction logic per `kind` (Anthropic's real Messages API
+   * uses a different content-block type for PDF vs. image input) — see
+   * `anthropicProvider.ts`'s own header for what's actually wired up
+   * versus disclosed-as-unverified.
+   */
+  kind?: "image" | "pdf";
+}
+
+/**
+ * Sprint 55 — a forwarded/shared voice note, pre-transcription. Kept
+ * separate from VisionExtractionInput (not a third `kind`) because
+ * transcription and vision extraction are genuinely different
+ * capabilities a provider may support independently of one another.
+ */
+export interface AudioTranscriptionInput {
+  base64Audio: string;
+  mimeType: string;
+}
+
+/**
+ * A transcribed voice note becomes plain text and re-enters the EXACT
+ * SAME text classification path every other text intake already uses
+ * (`classifyChannelIntakeDomain`) — this type only carries the
+ * transcript itself, never a domain guess of its own.
+ */
+export interface AudioTranscriptionResult {
+  transcript: string | null;
+  /** 'failed' covers both "no speech recognised" and a hard provider error — Vol 7_1 §5.1's own "extraction fails entirely" honesty pattern, extended to audio. */
+  status: "complete" | "failed";
 }
 
 /**
@@ -122,6 +198,34 @@ export interface WorkspaceAnswerResult {
 }
 
 /**
+ * Sprint 57 (Phase 5, 14 September 2026) — a NEW capability, distinct from
+ * `classify()` below. `classify()` picks a category WITHIN an
+ * already-known domain (`event.domain_hint`, decided before it is ever
+ * called); nothing in this codebase previously looked at raw text and
+ * decided WHICH domain it belongs to in the first place — that gap is what
+ * `classifyDomain` fills. See inputRouter.ts's `classifyPathBIntake` for
+ * the caller that uses this, and Sprint 57's own sprint-plan document
+ * (CORRECTION #2) for why this is a new method rather than a reuse of
+ * `classify()`.
+ */
+export interface DomainClassificationInput {
+  /** Raw captured text, or a short synthesised description of already-extracted fields (e.g. from a photo/PDF/voice capture) — either way, plain text the model reads directly. */
+  rawText: string;
+  /** The domains this call is allowed to choose from — always the full current `BusinessDomain` list minus `unclassified` (the model should say "unclassified" by returning a null/low-confidence result, not by being offered it as a target). */
+  candidateDomains: BusinessDomain[];
+}
+
+export interface DomainClassificationResult {
+  /** Null when the model itself could not confidently place the text in any candidate domain — distinct from a low-confidence guess (Vol_5_5 §7's "clarify rather than guess" principle, applied here to domain instead of category). */
+  domain: BusinessDomain | null;
+  /** 0.0-1.0 */
+  confidence: number;
+  reasoning: string;
+  /** Whatever structured fields the model could read off the text for the chosen domain (amount, counterparty, dates, line items) — shape varies by domain; downstream domain-bridge sprints (58-60) are what actually consume specific fields, this call only reports what it saw. */
+  extractedFields: Record<string, unknown>;
+}
+
+/**
  * A provider is a single classify call — deliberately not split into
  * separate agents (Vol 5_2 §4.1 Phase 1 scope; splitting is a Phase 2
  * decision per the Sprint 3 risk register). classify() is domain-agnostic:
@@ -137,6 +241,18 @@ export interface AiProvider {
     metrics: AiClassificationMetrics;
   }>;
   /**
+   * Optional — Sprint 57. A provider without a real domain-classification
+   * capability simply omits this method; the caller (`inputRouter.ts`'s
+   * `classifyPathBIntake`) falls back to the existing
+   * `classifyChannelIntakeDomain` regex heuristic — the same "missing
+   * capability is an honest, handled case, never a silent drop" pattern
+   * `extractExpenseFromImage`/`transcribeAudio` already use below.
+   */
+  classifyDomain?(input: DomainClassificationInput): Promise<{
+    result: DomainClassificationResult;
+    metrics: AiClassificationMetrics;
+  }>;
+  /**
    * Optional — a provider without vision capability simply omits this
    * method. The photo pipeline treats a missing method exactly like
    * extractionStatus 'failed': an honest instance of Vol 7_1 §5.1's
@@ -146,6 +262,22 @@ export interface AiProvider {
    */
   extractExpenseFromImage?(input: VisionExtractionInput): Promise<{
     result: VisionExtractionResult;
+    metrics: AiClassificationMetrics;
+  }>;
+  /**
+   * Optional — Sprint 55. A provider without real speech-to-text capability
+   * simply omits this method; the caller (`pathBMediaExtraction.ts`) treats
+   * a missing method as an honest "voice transcription isn't configured
+   * yet" outcome — never a silent drop, never a guessed transcript. As of
+   * this sprint, NEITHER shipped provider (`AnthropicExpenseProvider`,
+   * `GatewayExpenseProvider`) implements this: transcription needs a real
+   * speech-to-text vendor decision (a distinct capability from Claude's
+   * text/vision calls), which is the owner's own call to make, same class
+   * of decision as Phase 3's e-Invoice/WhatsApp external-account
+   * dependencies — not something to silently pick on their behalf.
+   */
+  transcribeAudio?(input: AudioTranscriptionInput): Promise<{
+    result: AudioTranscriptionResult;
     metrics: AiClassificationMetrics;
   }>;
   /**

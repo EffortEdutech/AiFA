@@ -23,6 +23,7 @@
     "@react-navigation/native": "^6.1.18",
     "@supabase/supabase-js": "^2.45.4",
     "expo": "~51.0.0",
+    "expo-dev-client": "~4.0.29",
     "expo-camera": "~15.0.16",
     "expo-crypto": "~13.0.2",
     "expo-file-system": "~17.0.1",

@@ -11,6 +11,23 @@
  * platform. So: Gateway if configured (VITE_AI_GATEWAY_URL), else the
  * capped-confidence local placeholder — the same honest, no-secret-in-
  * bundle choice, just without the mobile-only escape hatch.
+ *
+ * Sprint 55 update: image/PDF extraction (extractExpenseFromImage) now
+ * works on web too, via the Gateway's /ai-vision route, when signed in. No
+ * direct vision provider is injected here (the `undefined` third argument
+ * below) — web still has no safe direct-key path, by design, and doesn't
+ * need one now that the Gateway route covers it.
+ *
+ * 2026-09-08 fix: `provider`/`model` are now read from
+ * VITE_AI_GATEWAY_PROVIDER / VITE_AI_GATEWAY_MODEL instead of always
+ * defaulting to gatewayProvider.ts's hardcoded "anthropic" — that default
+ * meant every /ai-chat and /ai-vision call asked the Gateway to resolve an
+ * Anthropic credential no matter which provider's BYOK key the signed-in
+ * owner had actually added (e.g. a Gemini-only key produced
+ * no_credential_available for anthropic on every call, silently). Mirrors
+ * the EXPO_PUBLIC_AI_PROVIDER / EXPO_PUBLIC_AI_MODEL convention
+ * gatewayProvider.ts's constructor already supports for mobile — this is
+ * just web's equivalent, since Vite has no process.env to fall back to.
  */
 import { GatewayOrLocalExpenseProvider } from "@aifa/core/ai/providers/compositeProvider";
 import { GatewayExpenseProvider } from "@aifa/core/ai/providers/gatewayProvider";
@@ -31,13 +48,15 @@ export function getDefaultWebProvider(): AiProvider {
     const gatewayProvider = new GatewayExpenseProvider({
       gatewayUrl,
       appId: import.meta.env.VITE_AI_GATEWAY_APP_ID as string | undefined,
+      provider: import.meta.env.VITE_AI_GATEWAY_PROVIDER as string | undefined,
+      model: import.meta.env.VITE_AI_GATEWAY_MODEL as string | undefined,
       getAccessToken: async () =>
         (await getCurrentSession())?.access_token ?? null,
     });
     cachedProvider = new GatewayOrLocalExpenseProvider(
       gatewayProvider,
       localFallback,
-      undefined, // no vision provider on web this sprint — file/photo capture is Phase 2b (Vol 12_0 §4)
+      undefined, // no direct-key vision provider on web — Gateway's /ai-vision route (Sprint 55) is the only path, by design
       async () => Boolean(await getCurrentSession()),
     );
     return cachedProvider;

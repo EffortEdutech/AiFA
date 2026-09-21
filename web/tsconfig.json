@@ -17,7 +17,12 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@aifa/core/*": ["../packages/core/src/*"]
+      "@aifa/core/*": ["../packages/core/src/*"],
+      "@noble/ciphers/aes.js": ["node_modules/@noble/ciphers/aes.d.ts"],
+      "@noble/ciphers/utils.js": ["node_modules/@noble/ciphers/utils.d.ts"],
+      "@noble/hashes/hkdf.js": ["node_modules/@noble/hashes/hkdf.d.ts"],
+      "@noble/hashes/sha2.js": ["node_modules/@noble/hashes/sha2.d.ts"],
+      "@noble/hashes/utils.js": ["node_modules/@noble/hashes/utils.d.ts"]
     }
   },
   "include": ["src", "vite.config.ts"]

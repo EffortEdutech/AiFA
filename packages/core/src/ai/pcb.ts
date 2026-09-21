@@ -15,7 +15,7 @@
  */
 import type { CfoGuidance } from "./cfoGuidance";
 import type {
-  BusinessDomain,
+  AiLedgerDomain,
   CapturePcbInput,
   ProfessionalContextBundle,
 } from "./types";
@@ -27,23 +27,23 @@ type CategoryEntry = {
   example_vendors: string[];
 };
 
-const CATEGORY_LISTS: Record<BusinessDomain, CategoryEntry[]> = {
+const CATEGORY_LISTS: Record<AiLedgerDomain, CategoryEntry[]> = {
   expense: accountingRules.expense_categories,
   sale: accountingRules.sales_categories,
   purchase: accountingRules.purchase_categories,
 };
 
-const DOMAIN_LABEL: Record<BusinessDomain, string> = {
+const DOMAIN_LABEL: Record<AiLedgerDomain, string> = {
   expense: "Expense",
   sale: "Sales",
   purchase: "Purchase",
 };
 
-export function categoriesForDomain(domain: BusinessDomain): CategoryEntry[] {
+export function categoriesForDomain(domain: AiLedgerDomain): CategoryEntry[] {
   return CATEGORY_LISTS[domain];
 }
 
-export function rulesForDomain(domain: BusinessDomain) {
+export function rulesForDomain(domain: AiLedgerDomain) {
   return accountingRules.rules.filter((rule) => rule.domain === domain);
 }
 
