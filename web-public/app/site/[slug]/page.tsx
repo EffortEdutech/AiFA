@@ -4,6 +4,14 @@
 // HTML to a browser). Ports resolveBusinessId()/renderHomepage() from
 // supabase/functions/public-homepage/index.ts to React -- same resolution
 // (resolve_business_slug RPC), same content fields, same layout.
+//
+// businessName is read via get_public_business_name() (Sprint 70
+// follow-up, 21 September 2026), not a direct `.from("businesses")`
+// select -- confirmed live that RLS ("Members can view their own
+// business") silently blocks an anon read of legal_name, unlike
+// public-homepage/index.ts which uses a service_role client and never
+// hit this. The RPC is a narrow, SECURITY DEFINER exception scoped to
+// just legal_name, same pattern as resolve_business_slug().
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
@@ -37,18 +45,18 @@ async function loadSite(slug: string): Promise<Site | null> {
   );
   if (resolveError || !businessId) return null;
 
-  const [{ data: content }, { data: business }] = await Promise.all([
+  const [{ data: content }, { data: businessName }] = await Promise.all([
     supabase
       .from("public_site_content")
       .select("*")
       .eq("business_id", businessId)
       .maybeSingle(),
-    supabase.from("businesses").select("legal_name").eq("id", businessId).maybeSingle(),
+    supabase.rpc("get_public_business_name", { p_business_id: businessId }),
   ]);
 
   return {
     businessId: businessId as string,
-    businessName: (business as { legal_name?: string } | null)?.legal_name || "This business",
+    businessName: (businessName as string | null) || "This business",
     content: (content as SiteContent | null) ?? null,
   };
 }
