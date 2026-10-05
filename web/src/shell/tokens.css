@@ -1,11 +1,16 @@
 /**
- * Corporate design tokens — Sprint 37 (Vol 12_2 §7.1).
+ * Corporate design tokens — Sprint 37 (Vol 12_2 §7.1), extended by the
+ * UI polish initiative (Phase 1, October 2026).
+ *
+ * The original colour, typography and layout tokens below are unchanged.
+ * Phase 1 only ADDS tokens (spacing, radius, shadow, type scale, status
+ * tones, table, focus) so existing screens render exactly as before until
+ * they are migrated to the `web/src/ui/` kit.
  *
  * These are the PROPOSED defaults from Vol 12_2 §7.1, not a confirmed
  * owner decision (see that section's own Open Item note) -- deliberately
- * cheap to change: every consumer below reads a CSS custom property, so
- * revising a value here is a one-line change with zero structural
- * rework anywhere else in the shell.
+ * cheap to change: every consumer reads a CSS custom property, so
+ * revising a value here is a one-line change with zero structural rework.
  */
 :root {
   /* Primary -- deep slate-navy family (Vol 12_2 §7.1) */
@@ -19,11 +24,12 @@
   --aifa-accent: #2563EB;
   --aifa-accent-contrast: #FFFFFF;
 
-  /* Form-control background -- owner request (2026-09-03): buttons,
-     inputs, selects, and textareas use this gold fill instead of the
-     plain white surface. Text stays --aifa-text (near-black) for
-     contrast against it; --aifa-form-gold-hover is a touch deeper for
-     hover/pressed states. */
+  /* Brand gold -- owner request (2026-09-03), narrowed 2026-10-05: gold is
+     the single brand fill for PRIMARY buttons only (`.ui-btn--primary`).
+     Inputs, selects and secondary buttons use the white surface with a
+     border. The legacy element-level gold rules in index.css stay in
+     force for screens not yet migrated to the ui kit, and are removed
+     when the last page moves over (UI polish Phase 4). */
   --aifa-form-gold: #F0C419;
   --aifa-form-gold-hover: #DDB015;
   --aifa-form-gold-disabled: #F5E5A8;
@@ -35,11 +41,17 @@
   --aifa-warning-bg: #FEF3C7;
   --aifa-danger: #B3261E;
   --aifa-danger-bg: #FEE2E2;
+  --aifa-info: #1D4ED8;
+  --aifa-info-bg: #DBEAFE;
+  --aifa-neutral: #475569;
+  --aifa-neutral-bg: #E2E8F0;
 
   /* Neutrals */
   --aifa-bg: #F7F7F8;
   --aifa-surface: #FFFFFF;
+  --aifa-surface-muted: #F8FAFC;
   --aifa-border: #E2E2E5;
+  --aifa-border-strong: #CBD5E1;
   --aifa-text: #1A1A1A;
   --aifa-text-muted: #666666;
 
@@ -47,8 +59,40 @@
   --aifa-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --aifa-font-size-body: 14px;
   --aifa-font-size-table: 13px;
+  --aifa-font-size-xs: 12px;
+  --aifa-font-size-sm: 13px;
+  --aifa-font-size-lg: 16px;
+  --aifa-font-size-xl: 20px;
+  --aifa-font-size-2xl: 24px;
+  --aifa-font-weight-medium: 500;
+  --aifa-font-weight-semibold: 600;
+  --aifa-font-weight-bold: 700;
+  --aifa-line-height: 1.5;
 
-  /* Sidebar */
+  /* Spacing scale (4px base) */
+  --aifa-space-1: 4px;
+  --aifa-space-2: 8px;
+  --aifa-space-3: 12px;
+  --aifa-space-4: 16px;
+  --aifa-space-5: 24px;
+  --aifa-space-6: 32px;
+
+  /* Shape and elevation */
+  --aifa-radius-sm: 6px;
+  --aifa-radius-md: 8px;
+  --aifa-radius-lg: 12px;
+  --aifa-radius-pill: 999px;
+  --aifa-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --aifa-shadow-md: 0 4px 16px rgba(15, 23, 42, 0.12);
+  --aifa-shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.18);
+
+  /* Focus ring and tables */
+  --aifa-focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.35);
+  --aifa-table-header-bg: #F8FAFC;
+  --aifa-table-row-hover: #F8FAFC;
+
+  /* Layout */
+  --aifa-content-max-width: 1200px;
   --aifa-sidebar-width: 240px;
   --aifa-sidebar-width-collapsed: 56px;
   --aifa-topbar-height: 52px;
@@ -58,5 +102,4 @@
    background (see index.css) -- reserved here so a future dark-mode
    pass has a single place to redefine the tokens above, matching how
    Artifact-published pages structure their light/dark token split. Not
-   activated in Sprint 37 -- no dark-mode requirement has been stated by
-   the owner. */
+   activated -- no dark-mode requirement has been stated by the owner. */

@@ -1,0 +1,255 @@
+/* ==========================================================================
+   AiFA ui kit (UI polish Phase 1, October 2026)
+   Every rule here is namespaced `ui-` so it cannot change an existing,
+   unmigrated screen. Values come from the tokens in shell/tokens.css.
+   ========================================================================== */
+
+.ui-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ----- Page header ----- */
+.ui-page { max-width: var(--aifa-content-max-width); }
+.ui-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--aifa-space-3);
+  margin-bottom: var(--aifa-space-4);
+}
+.ui-page-title {
+  margin: 0;
+  font-size: var(--aifa-font-size-xl);
+  font-weight: var(--aifa-font-weight-semibold);
+  line-height: 1.3;
+  color: var(--aifa-primary-900);
+}
+.ui-page-desc {
+  margin: var(--aifa-space-1) 0 0;
+  max-width: 70ch;
+  color: var(--aifa-text-muted);
+  font-size: var(--aifa-font-size-body);
+}
+.ui-page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--aifa-space-2); }
+
+/* ----- Buttons ----- */
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font: inherit;
+  font-weight: var(--aifa-font-weight-semibold);
+  line-height: 1.2;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--aifa-radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.ui-btn:focus-visible { outline: none; box-shadow: var(--aifa-focus-ring); }
+.ui-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.ui-btn--sm { padding: 4px 10px; font-size: var(--aifa-font-size-sm); }
+
+.ui-btn--primary { background: var(--aifa-form-gold); color: var(--aifa-text); border-color: var(--aifa-form-gold-hover); }
+.ui-btn--primary:hover:not(:disabled) { background: var(--aifa-form-gold-hover); }
+
+.ui-btn--secondary { background: var(--aifa-surface); color: var(--aifa-text); border-color: var(--aifa-border-strong); }
+.ui-btn--secondary:hover:not(:disabled) { background: var(--aifa-primary-50); }
+
+.ui-btn--danger { background: var(--aifa-danger); color: #fff; border-color: var(--aifa-danger); }
+.ui-btn--danger:hover:not(:disabled) { background: #8f1d17; }
+
+.ui-btn--ghost { background: transparent; color: var(--aifa-accent); border-color: transparent; }
+.ui-btn--ghost:hover:not(:disabled) { background: var(--aifa-primary-50); }
+
+.ui-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: ui-spin 0.7s linear infinite;
+}
+@keyframes ui-spin { to { transform: rotate(360deg); } }
+
+/* ----- Card ----- */
+.ui-card {
+  background: var(--aifa-surface);
+  border: 1px solid var(--aifa-border);
+  border-radius: var(--aifa-radius-md);
+  box-shadow: var(--aifa-shadow-sm);
+  margin-bottom: var(--aifa-space-4);
+}
+.ui-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aifa-space-3);
+  padding: 14px var(--aifa-space-4);
+  border-bottom: 1px solid var(--aifa-border);
+}
+.ui-card__title { margin: 0; font-size: var(--aifa-font-size-lg); font-weight: var(--aifa-font-weight-semibold); }
+.ui-card__desc { margin: 2px 0 0; font-size: var(--aifa-font-size-sm); color: var(--aifa-text-muted); }
+.ui-card__body { padding: var(--aifa-space-4); }
+.ui-card__body--flush { padding: 0; }
+
+/* ----- Table ----- */
+.ui-table-wrap { overflow: auto; }
+.ui-table { width: 100%; border-collapse: collapse; font-size: var(--aifa-font-size-table); }
+.ui-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px var(--aifa-space-4);
+  background: var(--aifa-table-header-bg);
+  border-bottom: 1px solid var(--aifa-border-strong);
+  color: var(--aifa-primary-700);
+  font-size: var(--aifa-font-size-xs);
+  font-weight: var(--aifa-font-weight-semibold);
+  letter-spacing: 0.02em;
+  text-align: left;
+  white-space: nowrap;
+}
+.ui-table td { padding: 10px var(--aifa-space-4); border-bottom: 1px solid var(--aifa-border); vertical-align: middle; }
+.ui-table tbody tr:last-child td { border-bottom: 0; }
+.ui-table tbody tr:hover { background: var(--aifa-table-row-hover); }
+.ui-table .is-num { text-align: right; font-variant-numeric: tabular-nums; }
+.ui-table tr.is-clickable { cursor: pointer; }
+.ui-table tr.is-clickable:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--aifa-accent); }
+.ui-table-state { padding: var(--aifa-space-5); text-align: center; color: var(--aifa-text-muted); }
+.ui-table-state--error { color: var(--aifa-danger); background: var(--aifa-danger-bg); border-radius: var(--aifa-radius-sm); text-align: left; }
+
+/* ----- Status pill ----- */
+.ui-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: var(--aifa-radius-pill);
+  font-size: var(--aifa-font-size-xs);
+  font-weight: var(--aifa-font-weight-semibold);
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.ui-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.ui-pill--neutral { background: var(--aifa-neutral-bg); color: var(--aifa-neutral); }
+.ui-pill--info { background: var(--aifa-info-bg); color: var(--aifa-info); }
+.ui-pill--success { background: var(--aifa-success-bg); color: var(--aifa-success); }
+.ui-pill--warning { background: var(--aifa-warning-bg); color: var(--aifa-warning); }
+.ui-pill--danger { background: var(--aifa-danger-bg); color: var(--aifa-danger); }
+
+/* ----- Stat tiles ----- */
+.ui-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--aifa-space-4);
+  margin-bottom: var(--aifa-space-4);
+}
+.ui-stat {
+  padding: var(--aifa-space-4);
+  background: var(--aifa-surface);
+  border: 1px solid var(--aifa-border);
+  border-radius: var(--aifa-radius-md);
+  box-shadow: var(--aifa-shadow-sm);
+}
+.ui-stat__label { font-size: var(--aifa-font-size-xs); font-weight: var(--aifa-font-weight-semibold); color: var(--aifa-text-muted); }
+.ui-stat__value {
+  margin-top: var(--aifa-space-1);
+  font-size: var(--aifa-font-size-2xl);
+  font-weight: var(--aifa-font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  color: var(--aifa-primary-900);
+}
+.ui-stat__hint { margin-top: var(--aifa-space-1); font-size: var(--aifa-font-size-xs); color: var(--aifa-text-muted); }
+.ui-stat--success .ui-stat__value { color: var(--aifa-success); }
+.ui-stat--warning .ui-stat__value { color: var(--aifa-warning); }
+.ui-stat--danger .ui-stat__value { color: var(--aifa-danger); }
+.ui-stat--info .ui-stat__value { color: var(--aifa-info); }
+
+/* ----- Empty state ----- */
+.ui-empty { display: flex; flex-direction: column; align-items: center; gap: var(--aifa-space-2); padding: var(--aifa-space-6) var(--aifa-space-4); text-align: center; }
+.ui-empty__icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--aifa-primary-50); color: var(--aifa-primary-700); }
+.ui-empty__title { margin: 0; font-weight: var(--aifa-font-weight-semibold); color: var(--aifa-primary-900); }
+.ui-empty__desc { margin: 0; max-width: 46ch; color: var(--aifa-text-muted); }
+.ui-empty__action { margin-top: var(--aifa-space-2); }
+
+/* ----- Skeleton ----- */
+.ui-skeleton {
+  display: inline-block;
+  vertical-align: middle;
+  min-height: 14px;
+  border-radius: var(--aifa-radius-sm);
+  background: linear-gradient(90deg, var(--aifa-primary-100) 25%, var(--aifa-primary-50) 50%, var(--aifa-primary-100) 75%);
+  background-size: 200% 100%;
+  animation: ui-shimmer 1.4s ease-in-out infinite;
+}
+.ui-skeleton--value { width: 96px; height: 28px; }
+.ui-skeleton-lines { display: flex; flex-direction: column; gap: var(--aifa-space-2); }
+@keyframes ui-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* ----- Form fields ----- */
+.ui-field { display: flex; flex-direction: column; gap: var(--aifa-space-1); min-width: 0; }
+.ui-field__label { font-size: var(--aifa-font-size-sm); font-weight: var(--aifa-font-weight-semibold); color: var(--aifa-primary-700); }
+.ui-field__required { color: var(--aifa-danger); }
+.ui-field__hint { font-size: var(--aifa-font-size-xs); color: var(--aifa-text-muted); }
+.ui-field__error { font-size: var(--aifa-font-size-xs); color: var(--aifa-danger); }
+
+.ui-input,
+.ui-select,
+.ui-textarea {
+  width: 100%;
+  font: inherit;
+  padding: 8px 10px;
+  background: var(--aifa-surface);
+  color: var(--aifa-text);
+  border: 1px solid var(--aifa-border-strong);
+  border-radius: var(--aifa-radius-sm);
+}
+.ui-input::placeholder,
+.ui-textarea::placeholder { color: var(--aifa-text-muted); opacity: 1; }
+.ui-input:focus-visible,
+.ui-select:focus-visible,
+.ui-textarea:focus-visible { outline: none; border-color: var(--aifa-accent); box-shadow: var(--aifa-focus-ring); }
+.ui-input:disabled,
+.ui-select:disabled,
+.ui-textarea:disabled { background: var(--aifa-primary-50); color: var(--aifa-text-muted); cursor: not-allowed; }
+.ui-input[aria-invalid="true"],
+.ui-select[aria-invalid="true"],
+.ui-textarea[aria-invalid="true"] { border-color: var(--aifa-danger); }
+
+/* ----- Dialog ----- */
+.ui-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: var(--aifa-space-4);
+  background: rgba(15, 23, 42, 0.45);
+}
+.ui-dialog {
+  width: min(440px, 100%);
+  padding: var(--aifa-space-5);
+  background: var(--aifa-surface);
+  border-radius: var(--aifa-radius-lg);
+  box-shadow: var(--aifa-shadow-lg);
+}
+.ui-dialog__title { margin: 0 0 var(--aifa-space-2); font-size: var(--aifa-font-size-lg); font-weight: var(--aifa-font-weight-semibold); }
+.ui-dialog__message { margin: 0; color: var(--aifa-text-muted); }
+.ui-dialog__actions { display: flex; justify-content: flex-end; gap: var(--aifa-space-2); margin-top: var(--aifa-space-5); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-skeleton, .ui-spinner { animation: none; }
+  .ui-btn { transition: none; }
+}

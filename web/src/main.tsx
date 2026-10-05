@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense } from "react";
 import ReactDOM from "react-dom/client";
 
 import App from "./App";
@@ -19,8 +19,20 @@ if ("serviceWorker" in navigator) {
   });
 }
 
+// UI polish Phase 1: dev-only component gallery at `/?ui-preview`. The
+// `import.meta.env.DEV` guard is a compile-time constant, so production
+// builds drop the preview module entirely.
+const UiPreview = import.meta.env.DEV ? React.lazy(() => import("./ui/UiPreview")) : null;
+const showUiPreview = import.meta.env.DEV && new URLSearchParams(window.location.search).has("ui-preview");
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    {showUiPreview && UiPreview ? (
+      <Suspense fallback={null}>
+        <UiPreview />
+      </Suspense>
+    ) : (
+      <App />
+    )}
   </React.StrictMode>,
 );
