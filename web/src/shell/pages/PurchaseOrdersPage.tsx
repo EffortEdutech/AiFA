@@ -19,6 +19,9 @@
  * Accounts entry, exactly like the Payment Vouchers create form) since
  * it creates and immediately pays a real Payment Voucher under the
  * hood — reusing that pipeline rather than inventing a new one.
+ *
+ * UI polish Phase 4: presentation only — shared header, table with status
+ * pills / stat tiles, labelled fields. Same calls, gating and copy.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -27,6 +30,7 @@ import type { PurchaseOrder, PurchaseOrderStatus } from "@aifa/core/sync/purchas
 import type { Party } from "@aifa/core/sync/partyAndLedgerTransport";
 import type { ChartOfAccount } from "@aifa/core/sync/partyAndLedgerTransport";
 
+import { Button, Card, DataTable, PageHeader, StatusPill, formatDate, formatMoney, humanizeStatus, type Column } from "../../ui";
 import { supabase } from "../../lib/supabaseClient";
 import { listParties, listChartOfAccounts } from "../../lib/partiesAndAccounts";
 import { listPurchaseOrders } from "../../lib/purchaseOrders";
@@ -107,111 +111,138 @@ export function PurchaseOrdersPage({ businessId, onGoToApprovals }: Props): JSX.
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Purchase Orders</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
-
   const filtered = (orders ?? []).filter((po) => tab === "all" || po.status === tab);
   const counts = (status: PurchaseOrderStatus) => (orders ?? []).filter((po) => po.status === status).length;
 
+  const columns: Column<PurchaseOrder>[] = [
+    {
+      key: "po",
+      header: "Purchase order",
+      render: (po) => (
+        <>
+          <strong>{po.poNo}</strong>
+          <div className="ui-cell-sub">{partyName(po.partyId)}</div>
+          {po.notes && <div className="ui-cell-sub">{po.notes}</div>}
+        </>
+      ),
+    },
+    { key: "issued", header: "Issued", render: (po) => formatDate(po.issueDate) },
+    { key: "exp", header: "Expected", render: (po) => (po.expectedDeliveryDate ? formatDate(po.expectedDeliveryDate) : "—") },
+    {
+      key: "status",
+      header: "Status",
+      render: (po) => (
+        <StatusPill
+          status={po.status}
+          label={po.status === "stock_received_full" ? "Stock received (full)" : humanizeStatus(po.status)}
+        />
+      ),
+    },
+    {
+      key: "total",
+      header: "Total",
+      numeric: true,
+      render: (po) => (po.currency === "MYR" ? formatMoney(po.grandTotal) : `${po.currency} ${po.grandTotal.toFixed(2)}`),
+    },
+    {
+      key: "actions",
+      header: "",
+      render: (po) => {
+        const busy = busyId === po.id;
+        if (po.status === "approved") {
+          return (
+            <Button size="sm" variant="secondary" loading={busy} onClick={() => void handleConfirmReceipt(po)}>
+              {busy ? "Confirming…" : "Mark stock received (full)"}
+            </Button>
+          );
+        }
+        if (po.status === "stock_received_full") {
+          return (
+            <span className="ui-inline-actions">
+              <select
+                className="ui-select"
+                aria-label={`Expense category for ${po.poNo}`}
+                value={payExpenseCategoryById[po.id] ?? ""}
+                onChange={(e) => setPayExpenseCategoryById((prev) => ({ ...prev, [po.id]: e.target.value }))}
+                style={{ minWidth: 170 }}
+              >
+                <option value="">Select expense category…</option>
+                {expenseAccounts.map((a) => (
+                  <option key={a.id} value={a.accountName}>
+                    {a.accountName}
+                  </option>
+                ))}
+              </select>
+              <Button size="sm" variant="primary" loading={busy} disabled={!payExpenseCategoryById[po.id]} onClick={() => void handleMarkPaid(po)}>
+                {busy ? "Marking paid…" : "Mark Paid"}
+              </Button>
+            </span>
+          );
+        }
+        return null;
+      },
+    },
+  ];
+
+  const needsCategoryHint = (orders ?? []).some((po) => po.status === "stock_received_full") && expenseAccounts.length === 0;
+
   return (
     <div className="aifa-page">
-      <h1>Purchase Orders</h1>
-      <TabStrip
-        tabs={[
-          { id: "all", label: "All", count: orders?.length },
-          { id: "drafted", label: "Drafted", count: counts("drafted") },
-          { id: "approved", label: "Approved", count: counts("approved") },
-          { id: "stock_received_full", label: "Stock Received", count: counts("stock_received_full") },
-          { id: "paid", label: "Paid", count: counts("paid") },
-          { id: "rejected", label: "Rejected", count: counts("rejected") },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
-
-      <p className="muted" style={{ margin: "8px 0" }}>
-        A new purchase order routes through the Approvals inbox before it can advance.{" "}
-        {onGoToApprovals ? (
-          <button onClick={onGoToApprovals} style={{ padding: "0 4px" }}>
-            Go to Approvals
-          </button>
-        ) : (
-          "See the Approvals sidebar item."
-        )}
-      </p>
-
-      {actionError && <p className="error">{actionError}</p>}
-
-      {orders === null ? (
-        <p className="muted">Loading…</p>
-      ) : filtered.length === 0 ? (
-        <p className="muted">No purchase orders in this view.</p>
-      ) : (
-        filtered.map((po) => {
-          const busy = busyId === po.id;
-          return (
-            <div key={po.id} className="card">
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <strong>
-                  {po.poNo} — {partyName(po.partyId)}
-                </strong>
-                <span
-                  className="muted"
-                  style={po.status === "paid" ? { color: "#1b7a3d", fontWeight: 600 } : undefined}
-                >
-                  {po.status === "stock_received_full" ? "Stock received (full)" : po.status}
-                </span>
-              </div>
-              <p className="muted" style={{ margin: "4px 0" }}>
-                {po.currency} {po.grandTotal.toFixed(2)} · issued {po.issueDate}
-                {po.expectedDeliveryDate ? ` · expected ${po.expectedDeliveryDate}` : ""}
-              </p>
-              {po.notes && <p style={{ margin: "4px 0" }}>{po.notes}</p>}
-
-              {po.status === "approved" && (
-                <div className="row" style={{ marginTop: 6 }}>
-                  <button onClick={() => void handleConfirmReceipt(po)} disabled={busy}>
-                    {busy ? "Confirming…" : "Mark stock received (full)"}
-                  </button>
-                </div>
-              )}
-
-              {po.status === "stock_received_full" && (
-                <div className="row" style={{ marginTop: 6, flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                  <select
-                    value={payExpenseCategoryById[po.id] ?? ""}
-                    onChange={(e) =>
-                      setPayExpenseCategoryById((prev) => ({ ...prev, [po.id]: e.target.value }))
-                    }
-                    style={{ padding: 6, minWidth: 180 }}
-                  >
-                    <option value="">Select expense category…</option>
-                    {expenseAccounts.map((a) => (
-                      <option key={a.id} value={a.accountName}>
-                        {a.accountName}
-                      </option>
-                    ))}
-                  </select>
-                  <button onClick={() => void handleMarkPaid(po)} disabled={busy || !payExpenseCategoryById[po.id]}>
-                    {busy ? "Marking paid…" : "Mark Paid"}
-                  </button>
-                </div>
-              )}
-              {po.status === "stock_received_full" && expenseAccounts.length === 0 && (
-                <p className="muted" style={{ marginTop: 4 }}>
-                  No expense-type accounts found in your Chart of Accounts yet — add one there first.
-                </p>
-              )}
-            </div>
-          );
-        })
+      <PageHeader
+        title="Purchase Orders"
+        description="A new purchase order routes through the Approvals inbox before it can advance."
+        actions={
+          onGoToApprovals ? (
+            <Button variant="secondary" onClick={onGoToApprovals}>
+              Go to Approvals
+            </Button>
+          ) : undefined
+        }
+      >
+        <TabStrip
+          tabs={[
+            { id: "all", label: "All", count: orders?.length },
+            { id: "drafted", label: "Drafted", count: counts("drafted") },
+            { id: "approved", label: "Approved", count: counts("approved") },
+            { id: "stock_received_full", label: "Stock Received", count: counts("stock_received_full") },
+            { id: "paid", label: "Paid", count: counts("paid") },
+            { id: "rejected", label: "Rejected", count: counts("rejected") },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
+      {!onGoToApprovals && (
+        <p className="ui-muted" style={{ marginTop: 0 }}>
+          See the Approvals sidebar item.
+        </p>
       )}
+
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
+      {actionError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {actionError}
+        </p>
+      )}
+      {needsCategoryHint && (
+        <p className="aifa-alert aifa-alert--warning">
+          No expense-type accounts found in your Chart of Accounts yet — add one there first.
+        </p>
+      )}
+
+      <Card flush>
+        <DataTable
+          caption="Purchase orders"
+          columns={columns}
+          rows={loadError ? [] : orders === null ? null : filtered}
+          rowKey={(po) => po.id}
+          empty={<div className="ui-table-state">No purchase orders in this view.</div>}
+        />
+      </Card>
     </div>
   );
 }

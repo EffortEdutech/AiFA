@@ -1,6 +1,9 @@
 /**
  * Cash Book / P&L — Sprint 41 (Vol 13_0 §8, pulled forward for this
  * module's own reporting needs). Read-only, per this sprint's own scope.
+ *
+ * UI polish Phase 4: presentation only — shared header, table with status
+ * pills / stat tiles, labelled fields. Same calls, gating and copy.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -12,6 +15,7 @@ import type {
 } from "@aifa/core/sync/paymentVouchersReportsTransport";
 import type { BankAccount } from "@aifa/core/sync/partyAndLedgerTransport";
 
+import { Button, Card, DataTable, Field, PageHeader, StatGrid, StatTile, formatDate, formatMoney, humanizeStatus, type Column } from "../../ui";
 import { supabase } from "../../lib/supabaseClient";
 import { listBankAccounts } from "../../lib/partiesAndAccounts";
 import { TabStrip } from "../TabStrip";
@@ -97,116 +101,101 @@ export function CashBookPlPage({ businessId }: Props): JSX.Element {
     else loadPl().catch(() => {});
   }, [tab, loadCashBook, loadPl]);
 
+  const cashColumns: Column<CashBookEntry>[] = [
+    { key: "date", header: "Date", render: (r) => formatDate(r.postedAt) },
+    { key: "dir", header: "Direction", render: (r) => humanizeStatus(r.direction) },
+    { key: "amt", header: "Amount", numeric: true, render: (r) => formatMoney(r.amount) },
+    { key: "bal", header: "Running balance", numeric: true, render: (r) => formatMoney(r.runningBalance) },
+  ];
+  const catColumns: Column<ExpenseCategoryBreakdownEntry>[] = [
+    { key: "name", header: "Category", render: (b) => b.accountName },
+    { key: "pct", header: "% of expense", numeric: true, render: (b) => `${b.pctOfTotalExpense.toFixed(1)}%` },
+    { key: "amt", header: "Amount", numeric: true, render: (b) => formatMoney(b.amount) },
+  ];
+
   return (
     <div className="aifa-page">
-      <h1>Cash Book / P&amp;L</h1>
-      <TabStrip
-        tabs={[
-          { id: "cash-book", label: "Cash Book" },
-          { id: "profit-and-loss", label: "Profit & Loss" },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
+      <PageHeader title="Cash Book / P&L" description="Read-only reports from the posted ledger.">
+        <TabStrip
+          tabs={[
+            { id: "cash-book", label: "Cash Book" },
+            { id: "profit-and-loss", label: "Profit & Loss" },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
 
-      <div className="row" style={{ margin: "12px 0" }}>
-        {tab === "cash-book" && (
-          <select value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)} style={{ padding: 6, minWidth: 200 }}>
-            {bankAccounts.length === 0 && <option value="">No bank accounts yet</option>}
-            {bankAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.accountName}
-              </option>
-            ))}
-          </select>
-        )}
-        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ padding: 6 }} />
-        <span className="muted">to</span>
-        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ padding: 6 }} />
-        <button onClick={() => void (tab === "cash-book" ? loadCashBook() : loadPl())} disabled={busy}>
-          {busy ? "Loading…" : "Refresh"}
-        </button>
-      </div>
+      <Card>
+        <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+          {tab === "cash-book" && (
+            <Field label="Bank account">
+              {(p) => (
+                <select {...p} className="ui-select" value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)}>
+                  {bankAccounts.length === 0 && <option value="">No bank accounts yet</option>}
+                  {bankAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.accountName}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
+          )}
+          <Field label="From">
+            {(p) => <input {...p} className="ui-input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />}
+          </Field>
+          <Field label="To">
+            {(p) => <input {...p} className="ui-input" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />}
+          </Field>
+          <Button variant="secondary" loading={busy} onClick={() => void (tab === "cash-book" ? loadCashBook() : loadPl())}>
+            {busy ? "Loading…" : "Refresh"}
+          </Button>
+        </div>
+      </Card>
 
-      {loadError && <p className="error">{loadError}</p>}
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
 
       {tab === "cash-book" && (
-        <>
+        <Card flush>
           {bankAccounts.length === 0 ? (
-            <p className="muted">Add a bank account (Chart of Accounts page) to see its cash book here.</p>
-          ) : cashBookRows === null ? (
-            <p className="muted">Loading…</p>
-          ) : cashBookRows.length === 0 ? (
-            <p className="muted">No movement in this date range.</p>
+            <div className="ui-table-state">Add a bank account (Chart of Accounts page) to see its cash book here.</div>
           ) : (
-            <div className="card" style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ textAlign: "left" }}>
-                    <th style={{ padding: 6 }}>Date</th>
-                    <th style={{ padding: 6 }}>Direction</th>
-                    <th style={{ padding: 6 }}>Amount</th>
-                    <th style={{ padding: 6 }}>Running balance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cashBookRows.map((r) => (
-                    <tr key={r.entryId} style={{ borderTop: "1px solid var(--aifa-border, #e2e2e2)" }}>
-                      <td style={{ padding: 6 }}>{r.postedAt}</td>
-                      <td style={{ padding: 6 }}>{r.direction}</td>
-                      <td style={{ padding: 6 }}>RM{r.amount.toFixed(2)}</td>
-                      <td style={{ padding: 6 }}>RM{r.runningBalance.toFixed(2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              caption="Cash book movements"
+              columns={cashColumns}
+              rows={loadError ? [] : cashBookRows}
+              rowKey={(r) => r.entryId}
+              empty={<div className="ui-table-state">No movement in this date range.</div>}
+            />
           )}
-        </>
+        </Card>
       )}
 
       {tab === "profit-and-loss" && (
         <>
-          {pl === null ? (
-            <p className="muted">Loading…</p>
-          ) : (
-            <div className="card">
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <span>Total revenue</span>
-                <strong>RM{pl.totalRevenue.toFixed(2)}</strong>
-              </div>
-              <div className="row" style={{ justifyContent: "space-between", marginTop: 4 }}>
-                <span>Total expense</span>
-                <strong>RM{pl.totalExpense.toFixed(2)}</strong>
-              </div>
-              <div
-                className="row"
-                style={{ justifyContent: "space-between", marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--aifa-border, #e2e2e2)" }}
-              >
-                <span>Net profit</span>
-                <strong style={{ color: pl.netProfit >= 0 ? "#1b7a3d" : "#c0392b" }}>RM{pl.netProfit.toFixed(2)}</strong>
-              </div>
-            </div>
-          )}
-
-          <h2 style={{ fontSize: 14, marginTop: 16 }}>Expense breakdown by category</h2>
-          {breakdown === null ? (
-            <p className="muted">Loading…</p>
-          ) : breakdown.length === 0 ? (
-            <p className="muted">No expense posted in this date range.</p>
-          ) : (
-            breakdown.map((b) => (
-              <div key={b.accountCode} className="card">
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <strong>{b.accountName}</strong>
-                  <span className="muted">{b.pctOfTotalExpense.toFixed(1)}%</span>
-                </div>
-                <p className="muted" style={{ margin: "4px 0" }}>
-                  RM{b.amount.toFixed(2)}
-                </p>
-              </div>
-            ))
-          )}
+          <StatGrid>
+            <StatTile label="Total revenue" value={pl ? formatMoney(pl.totalRevenue) : null} />
+            <StatTile label="Total expense" value={pl ? formatMoney(pl.totalExpense) : null} />
+            <StatTile
+              label="Net profit"
+              value={pl ? formatMoney(pl.netProfit) : null}
+              tone={pl ? (pl.netProfit >= 0 ? "success" : "danger") : "neutral"}
+            />
+          </StatGrid>
+          <Card title="Expense breakdown by category" flush>
+            <DataTable
+              caption="Expense breakdown by category"
+              columns={catColumns}
+              rows={loadError ? [] : breakdown}
+              rowKey={(b) => b.accountCode}
+              empty={<div className="ui-table-state">No expense posted in this date range.</div>}
+            />
+          </Card>
         </>
       )}
     </div>

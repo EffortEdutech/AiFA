@@ -19,6 +19,9 @@
  * labelled as a placeholder for wherever the file already lives — real
  * upload wiring is flagged as its own small follow-on task, exactly as
  * the sprint doc's own Risks table anticipated.
+ *
+ * UI polish Phase 4: presentation only — shared header, table with status
+ * pills, labelled create form, Mark Paid in the row. Same calls and notes.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -27,6 +30,7 @@ import type { PaymentVoucher, PaymentVoucherStatus, PaymentVoucherPaymentMethod 
 import type { Party } from "@aifa/core/sync/partyAndLedgerTransport";
 import type { ChartOfAccount } from "@aifa/core/sync/partyAndLedgerTransport";
 
+import { Button, Card, DataTable, Field, PageHeader, StatusPill, formatDate, formatMoney, humanizeStatus, type Column } from "../../ui";
 import { supabase } from "../../lib/supabaseClient";
 import { listParties, listChartOfAccounts } from "../../lib/partiesAndAccounts";
 import { listPaymentVouchers } from "../../lib/purchasesAndCash";
@@ -146,144 +150,189 @@ export function PaymentVouchersPage({ businessId, onGoToApprovals, initialCreate
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Payment Vouchers</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
-
   const filtered = (vouchers ?? []).filter((v) => tab === "all" || v.status === tab);
   const counts = (status: PaymentVoucherStatus) => (vouchers ?? []).filter((v) => v.status === status).length;
 
+  const columns: Column<PaymentVoucher>[] = [
+    {
+      key: "pv",
+      header: "Voucher",
+      render: (pv) => (
+        <>
+          <strong>{pv.pvNo}</strong>
+          <div className="ui-cell-sub">{partyName(pv.payeePartyId)}</div>
+          {pv.notes && <div className="ui-cell-sub">{pv.notes}</div>}
+        </>
+      ),
+    },
+    { key: "cat", header: "Category", render: (pv) => pv.expenseCategory },
+    { key: "method", header: "Method", render: (pv) => humanizeStatus(pv.paymentMethod) },
+    { key: "issued", header: "Issued", render: (pv) => formatDate(pv.issueDate) },
+    {
+      key: "status",
+      header: "Status",
+      render: (pv) => (
+        <StatusPill
+          status={pv.status}
+          label={pv.status === "approved" ? "Approved — not yet paid" : humanizeStatus(pv.status)}
+        />
+      ),
+    },
+    {
+      key: "total",
+      header: "Total",
+      numeric: true,
+      render: (pv) => (pv.currency === "MYR" ? formatMoney(pv.grandTotal) : `${pv.currency} ${pv.grandTotal.toFixed(2)}`),
+    },
+    {
+      key: "actions",
+      header: "",
+      render: (pv) =>
+        pv.status === "approved" ? (
+          <Button size="sm" variant="primary" loading={busyId === pv.id} onClick={() => void handleMarkPaid(pv)}>
+            {busyId === pv.id ? "Marking paid…" : "Mark Paid (money has actually left the business)"}
+          </Button>
+        ) : null,
+    },
+  ];
+
   return (
     <div className="aifa-page">
-      <h1>Payment Vouchers</h1>
-      <TabStrip
-        tabs={[
-          { id: "all", label: "All", count: vouchers?.length },
-          { id: "draft", label: "Draft", count: counts("draft") },
-          { id: "approved", label: "Approved (not yet paid)", count: counts("approved") },
-          { id: "paid", label: "Paid", count: counts("paid") },
-          { id: "rejected", label: "Rejected", count: counts("rejected") },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
+      <PageHeader
+        title="Payment Vouchers"
+        description="A new voucher routes through the Approvals inbox before it can be marked paid."
+        actions={
+          <>
+            {onGoToApprovals && (
+              <Button variant="secondary" onClick={onGoToApprovals}>
+                Go to Approvals
+              </Button>
+            )}
+            <Button variant="primary" icon={showCreate ? undefined : "plus"} onClick={() => setShowCreate((s) => !s)}>
+              {showCreate ? "Cancel" : "New payment voucher"}
+            </Button>
+          </>
+        }
+      >
+        <TabStrip
+          tabs={[
+            { id: "all", label: "All", count: vouchers?.length },
+            { id: "draft", label: "Draft", count: counts("draft") },
+            { id: "approved", label: "Approved (not yet paid)", count: counts("approved") },
+            { id: "paid", label: "Paid", count: counts("paid") },
+            { id: "rejected", label: "Rejected", count: counts("rejected") },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
+      {!onGoToApprovals && (
+        <p className="ui-muted" style={{ marginTop: 0 }}>
+          See the Approvals sidebar item.
+        </p>
+      )}
 
-      <p className="muted" style={{ margin: "8px 0" }}>
-        A new voucher routes through the Approvals inbox before it can be marked paid.{" "}
-        {onGoToApprovals ? (
-          <button onClick={onGoToApprovals} style={{ padding: "0 4px" }}>
-            Go to Approvals
-          </button>
-        ) : (
-          "See the Approvals sidebar item."
-        )}
-      </p>
-
-      <div className="row" style={{ margin: "12px 0" }}>
-        <button onClick={() => setShowCreate((s) => !s)}>{showCreate ? "Cancel" : "New payment voucher"}</button>
-      </div>
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
 
       {showCreate && (
-        <div className="card">
-          <h2 style={{ fontSize: 16, marginTop: 0 }}>New payment voucher</h2>
-          <div className="row">
-            <select value={payeePartyId} onChange={(e) => setPayeePartyId(e.target.value)} style={{ padding: 6, minWidth: 200 }}>
-              <option value="">Select payee…</option>
-              {parties.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.displayName}
-                </option>
-              ))}
-            </select>
-            <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)} style={{ padding: 6, minWidth: 180 }}>
-              <option value="">Select expense category…</option>
-              {expenseAccounts.map((a) => (
-                <option key={a.id} value={a.accountName}>
-                  {a.accountName}
-                </option>
-              ))}
-            </select>
-          </div>
-          {expenseAccounts.length === 0 && (
-            <p className="muted" style={{ marginTop: 4 }}>
-              No expense-type accounts found in your Chart of Accounts yet — add one there first.
-            </p>
-          )}
-          <div className="row" style={{ marginTop: 8 }}>
-            <input placeholder="Amount (RM)" value={grandTotal} onChange={(e) => setGrandTotal(e.target.value)} style={{ padding: 6, width: 140 }} />
-            <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentVoucherPaymentMethod)} style={{ padding: 6 }}>
-              {PAYMENT_METHODS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="row" style={{ marginTop: 8 }}>
-            <input placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} style={{ padding: 6, flex: 1 }} />
-          </div>
-          <div className="row" style={{ marginTop: 8 }}>
-            <input
-              placeholder="Receipt storage reference (optional — file upload isn't wired yet, see this page's own header)"
-              value={receiptStorageRef}
-              onChange={(e) => setReceiptStorageRef(e.target.value)}
-              style={{ padding: 6, flex: 1 }}
-            />
-          </div>
-          <div className="row" style={{ marginTop: 10 }}>
-            <button
-              onClick={() => void handleCreate()}
-              disabled={createBusy || !payeePartyId || !expenseCategory || !grandTotal.trim()}
-            >
-              {createBusy ? "Creating…" : "Create voucher"}
-            </button>
-          </div>
-          {createError && <p className="error">{createError}</p>}
-        </div>
-      )}
-
-      {actionError && <p className="error">{actionError}</p>}
-
-      {vouchers === null ? (
-        <p className="muted">Loading…</p>
-      ) : filtered.length === 0 ? (
-        <p className="muted">No payment vouchers in this view.</p>
-      ) : (
-        filtered.map((pv) => {
-          const busy = busyId === pv.id;
-          return (
-            <div key={pv.id} className="card">
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <strong>
-                  {pv.pvNo} — {partyName(pv.payeePartyId)}
-                </strong>
-                <span
-                  className="muted"
-                  style={pv.status === "paid" ? { color: "#1b7a3d", fontWeight: 600 } : undefined}
-                >
-                  {pv.status === "approved" ? "Approved — not yet paid" : pv.status}
-                </span>
-              </div>
-              <p className="muted" style={{ margin: "4px 0" }}>
-                {pv.currency} {pv.grandTotal.toFixed(2)} · {pv.expenseCategory} · {pv.paymentMethod} · issued {pv.issueDate}
-              </p>
-              {pv.notes && <p style={{ margin: "4px 0" }}>{pv.notes}</p>}
-              {pv.status === "approved" && (
-                <div className="row" style={{ marginTop: 6 }}>
-                  <button onClick={() => void handleMarkPaid(pv)} disabled={busy}>
-                    {busy ? "Marking paid…" : "Mark Paid (money has actually left the business)"}
-                  </button>
-                </div>
-              )}
+        <Card title="New payment voucher">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!createBusy && payeePartyId && expenseCategory && grandTotal.trim()) void handleCreate();
+            }}
+          >
+            <div className="ui-form-grid">
+              <Field label="Payee" required>
+                {(p) => (
+                  <select {...p} className="ui-select" value={payeePartyId} onChange={(e) => setPayeePartyId(e.target.value)}>
+                    <option value="">Select payee…</option>
+                    {parties.map((pt) => (
+                      <option key={pt.id} value={pt.id}>
+                        {pt.displayName}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+              <Field
+                label="Expense category"
+                required
+                hint={expenseAccounts.length === 0 ? "No expense-type accounts found in your Chart of Accounts yet — add one there first." : undefined}
+              >
+                {(p) => (
+                  <select {...p} className="ui-select" value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)}>
+                    <option value="">Select expense category…</option>
+                    {expenseAccounts.map((a) => (
+                      <option key={a.id} value={a.accountName}>
+                        {a.accountName}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+              <Field label="Amount (RM)" required>
+                {(p) => <input {...p} className="ui-input" inputMode="decimal" value={grandTotal} onChange={(e) => setGrandTotal(e.target.value)} />}
+              </Field>
+              <Field label="Payment method">
+                {(p) => (
+                  <select
+                    {...p}
+                    className="ui-select"
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value as PaymentVoucherPaymentMethod)}
+                  >
+                    {PAYMENT_METHODS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+              <Field label="Notes (optional)">
+                {(p) => <input {...p} className="ui-input" value={notes} onChange={(e) => setNotes(e.target.value)} />}
+              </Field>
+              <Field
+                label="Receipt storage reference (optional)"
+                hint="File upload isn't wired yet — see this page's own header."
+              >
+                {(p) => <input {...p} className="ui-input" value={receiptStorageRef} onChange={(e) => setReceiptStorageRef(e.target.value)} />}
+              </Field>
             </div>
-          );
-        })
+            <div className="ui-form-actions">
+              <Button type="submit" variant="primary" loading={createBusy} disabled={!payeePartyId || !expenseCategory || !grandTotal.trim()}>
+                {createBusy ? "Creating…" : "Create voucher"}
+              </Button>
+            </div>
+            {createError && (
+              <p className="aifa-alert aifa-alert--danger" role="alert">
+                {createError}
+              </p>
+            )}
+          </form>
+        </Card>
       )}
+
+      {actionError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {actionError}
+        </p>
+      )}
+
+      <Card flush>
+        <DataTable
+          caption="Payment vouchers"
+          columns={columns}
+          rows={loadError ? [] : vouchers === null ? null : filtered}
+          rowKey={(pv) => pv.id}
+          empty={<div className="ui-table-state">No payment vouchers in this view.</div>}
+        />
+      </Card>
     </div>
   );
 }
