@@ -15,9 +15,13 @@
  * "Publish Changes" is the one and only write path (Architecture §2.3's
  * own design: nothing here is a live-editing shared record) — matches
  * the mockup's own button, not a coincidence.
+ *
+ * UI polish Phase 4: presentation only — shared card, labelled fields and
+ * buttons. Same data calls, gating and copy.
  */
 import { useEffect, useState } from "react";
 
+import { Button, Card, Field } from "../ui";
 import {
   getPublicSiteContent,
   publishSiteContent,
@@ -115,127 +119,97 @@ export function WebsiteSettingsCard({ businessId, canConfigure }: Props): JSX.El
   }
 
   return (
-    <div className="card">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h2 style={{ fontSize: 16, marginTop: 0 }}>Website</h2>
-        {publishedAt && (
-          <span className="muted" style={{ fontSize: 12 }}>
-            Last published {new Date(publishedAt).toLocaleString()}
-          </span>
-        )}
-      </div>
-      <p className="muted" style={{ marginTop: 0 }}>
-        This is what visitors see on your Public Site — no login required. Nothing here is encrypted; only
-        publish what you're happy to make public.
-      </p>
-
-      {loadError && <p className="error">{loadError}</p>}
+    <Card
+      title="Website"
+      description="This is what visitors see on your Public Site — no login required. Nothing here is encrypted; only publish what you're happy to make public."
+      actions={
+        publishedAt ? <span className="ui-muted">Last published {new Date(publishedAt).toLocaleString()}</span> : undefined
+      }
+    >
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
       {loading ? (
-        <p className="muted">Loading…</p>
+        <p className="ui-muted">Loading…</p>
       ) : (
-        <>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <label>
-              Hero headline
-              <input
-                value={heroHeadline}
-                onChange={(e) => setHeroHeadline(e.target.value)}
-                disabled={!canConfigure}
-                placeholder="e.g. NHL Global Solution"
-                style={{ display: "block", width: "100%", marginTop: 4, padding: 6 }}
-              />
-            </label>
-            <label>
-              Hero subtext
-              <input
-                value={heroSubtext}
-                onChange={(e) => setHeroSubtext(e.target.value)}
-                disabled={!canConfigure}
-                placeholder="A short line describing your business"
-                style={{ display: "block", width: "100%", marginTop: 4, padding: 6 }}
-              />
-            </label>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canConfigure && !busy) void handlePublish();
+          }}
+        >
+          <div className="ui-form-grid">
+            <Field label="Hero headline">
+              {(p) => (
+                <input {...p} className="ui-input" value={heroHeadline} onChange={(e) => setHeroHeadline(e.target.value)} disabled={!canConfigure} placeholder="e.g. NHL Global Solution" />
+              )}
+            </Field>
+            <Field label="Hero subtext">
+              {(p) => (
+                <input {...p} className="ui-input" value={heroSubtext} onChange={(e) => setHeroSubtext(e.target.value)} disabled={!canConfigure} placeholder="A short line describing your business" />
+              )}
+            </Field>
+          </div>
 
-            <div>
-              <span className="muted">Services</span>
-              {services.map((service, i) => (
-                <div key={i} className="row" style={{ gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-                  <input
-                    value={service.name}
-                    onChange={(e) => updateService(i, "name", e.target.value)}
-                    disabled={!canConfigure}
-                    placeholder="Service name"
-                    style={{ padding: 6, flex: "1 1 160px" }}
-                  />
-                  <input
-                    value={service.description}
-                    onChange={(e) => updateService(i, "description", e.target.value)}
-                    disabled={!canConfigure}
-                    placeholder="Short description"
-                    style={{ padding: 6, flex: "2 1 240px" }}
-                  />
-                  {canConfigure && services.length > 1 && (
-                    <button onClick={() => removeService(i)} aria-label="Remove service">
-                      ✕
-                    </button>
-                  )}
-                </div>
-              ))}
-              {canConfigure && (
-                <button onClick={addService} style={{ marginTop: 6 }}>
-                  + Add service
-                </button>
+          <h3 className="ui-section-title">Services</h3>
+          {services.map((service, i) => (
+            <div key={i} className="ui-inline-actions" style={{ alignItems: "flex-end", marginBottom: 8 }}>
+              <Field label={`Service ${i + 1} name`}>
+                {(p) => (
+                  <input {...p} className="ui-input" value={service.name} onChange={(e) => updateService(i, "name", e.target.value)} disabled={!canConfigure} placeholder="Service name" />
+                )}
+              </Field>
+              <Field label="Short description">
+                {(p) => (
+                  <input {...p} className="ui-input" value={service.description} onChange={(e) => updateService(i, "description", e.target.value)} disabled={!canConfigure} placeholder="Short description" />
+                )}
+              </Field>
+              {canConfigure && services.length > 1 && (
+                <Button size="sm" variant="ghost" icon="x" aria-label="Remove service" onClick={() => removeService(i)}>
+                  Remove
+                </Button>
               )}
             </div>
+          ))}
+          {canConfigure && (
+            <Button size="sm" variant="secondary" icon="plus" onClick={addService}>
+              Add service
+            </Button>
+          )}
 
-            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-              <label style={{ flex: "1 1 200px" }}>
-                Contact email
-                <input
-                  type="email"
-                  value={contactEmail}
-                  onChange={(e) => setContactEmail(e.target.value)}
-                  disabled={!canConfigure}
-                  style={{ display: "block", width: "100%", marginTop: 4, padding: 6 }}
-                />
-              </label>
-              <label style={{ flex: "1 1 200px" }}>
-                Contact phone
-                <input
-                  value={contactPhone}
-                  onChange={(e) => setContactPhone(e.target.value)}
-                  disabled={!canConfigure}
-                  style={{ display: "block", width: "100%", marginTop: 4, padding: 6 }}
-                />
-              </label>
-              <label style={{ flex: "0 0 140px" }}>
-                Accent colour
-                <input
-                  type="color"
-                  value={accentColor}
-                  onChange={(e) => setAccentColor(e.target.value)}
-                  disabled={!canConfigure}
-                  style={{ display: "block", width: "100%", marginTop: 4, padding: 2, height: 32 }}
-                />
-              </label>
-            </div>
+          <div className="ui-form-grid" style={{ marginTop: 16 }}>
+            <Field label="Contact email">
+              {(p) => <input {...p} className="ui-input" type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} disabled={!canConfigure} />}
+            </Field>
+            <Field label="Contact phone">
+              {(p) => <input {...p} className="ui-input" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} disabled={!canConfigure} />}
+            </Field>
+            <Field label="Accent colour">
+              {(p) => (
+                <input {...p} className="ui-input" type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} disabled={!canConfigure} style={{ height: 36, padding: 2 }} />
+              )}
+            </Field>
           </div>
 
           {canConfigure ? (
-            <div className="row" style={{ marginTop: 12 }}>
-              <button onClick={() => void handlePublish()} disabled={busy}>
+            <div className="ui-form-actions">
+              <Button type="submit" variant="primary" loading={busy}>
                 {busy ? "Publishing…" : "Publish Changes"}
-              </button>
-              {justPublished && <span className="muted">Published.</span>}
+              </Button>
+              {justPublished && <span className="ui-muted">Published.</span>}
             </div>
           ) : (
-            <p className="muted" style={{ marginTop: 12 }}>
-              Editing requires `settings: configure` access — contact an Owner or Bookkeeper to change this.
+            <p className="ui-muted">Editing requires `settings: configure` access — contact an Owner or Bookkeeper to change this.</p>
+          )}
+          {publishError && (
+            <p className="aifa-alert aifa-alert--danger" role="alert">
+              {publishError}
             </p>
           )}
-          {publishError && <p className="error">{publishError}</p>}
-        </>
+        </form>
       )}
-    </div>
+    </Card>
   );
 }

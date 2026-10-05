@@ -20,6 +20,7 @@ import {
   type RegisteredDevice,
 } from "../lib/syncService";
 import { useAccess } from "../shell/AccessContext";
+import { Button, Card, DataTable, StatusPill, type Column } from "../ui";
 import { TabStrip } from "../shell/TabStrip";
 
 interface Props {
@@ -52,6 +53,9 @@ interface Props {
  * actually mapped even though the column existed server-side since
  * Sprint 23's ad-hoc migration -- added as a small, disclosed transport
  * fix this sprint (see that file's own note), not a new backend change.
+ *
+ * UI polish Phase 4: presentation only — a shared Card + DataTable; the
+ * read-only-device notice, confirmations and every action are unchanged.
  */
 export function DevicesPanel({ db, businessId, deviceId, dek }: Props): JSX.Element {
   const { myMembership, membershipChecked, isOwner } = useAccess();
@@ -188,23 +192,138 @@ export function DevicesPanel({ db, businessId, deviceId, dek }: Props): JSX.Elem
     }).catch(() => {});
   };
 
-  if (loadError) {
-    return (
-      <div className="card">
-        <h2 style={{ fontSize: 16, marginTop: 0 }}>Devices</h2>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
+  const visibleDevices =
+    devices === null
+      ? null
+      : devices.filter((device) => {
+          if (isOwner && scopeTab === "all") return true;
+          // Non-Owner, or Owner's own "My Devices" tab: scope to the
+          // signed-in user's own membership (Vol 12_1 §5b). While the
+          // membership lookup is still in flight, hide every row rather
+          // than briefly showing every member's devices (scoping is
+          // enforced client-side; getAllDevices returns every device for
+          // the business). Once resolved, a null myMembership is the
+          // intentional dev-bypass/unrestricted path.
+          if (!membershipChecked) return false;
+          if (!myMembership) return true;
+          return device.businessMembershipId === myMembership.id;
+        });
+
+  const columns: Column<RegisteredDevice>[] = [
+    {
+      key: "device",
+      header: "Device",
+      render: (device) => {
+        const isMe = device.deviceId === deviceId;
+        const isActive = !device.revokedAt && activeInfo?.activeDeviceId === device.deviceId;
+        if (renamingDeviceId === device.deviceId) {
+          return (
+            <input
+              className="ui-input"
+              aria-label="Device name"
+              value={renameDraft}
+              onChange={(e) => setRenameDraft(e.target.value)}
+              autoFocus
+            />
+          );
+        }
+        return (
+          <>
+            <strong>
+              {device.deviceLabel}
+              {isMe ? " (this device)" : ""}
+            </strong>
+            {device.isPrimary && <span style={{ color: "var(--aifa-accent)", marginLeft: 8 }}>★ Primary</span>}
+            <div className="ui-cell-sub">
+              {describePlatform(device.platform)} · Last seen {relativeTime(device.lastSeenAt)} · Registered{" "}
+              {formatDate(device.registeredAt)}
+            </div>
+            {isActive && activeInfo && (
+              <div className="ui-cell-sub">
+                {describeReadOnlyReason({
+                  activeDeviceLabel: activeInfo.activeDeviceLabel,
+                  activeDeviceIsPrimary: activeInfo.activeDeviceIsPrimary,
+                })}
+              </div>
+            )}
+          </>
+        );
+      },
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (device) => {
+        const isRevoked = !!device.revokedAt;
+        const isActive = !isRevoked && activeInfo?.activeDeviceId === device.deviceId;
+        const label = isRevoked ? "Revoked" : isActive ? "Active" : "Read-only";
+        return <StatusPill status={label} label={label} tone={isRevoked ? "danger" : isActive ? "success" : "neutral"} />;
+      },
+    },
+    {
+      key: "sync",
+      header: "Sync",
+      render: (device) => {
+        if (device.revokedAt) return "—";
+        const checkpoint = device.deviceId === deviceId ? myCheckpoint : device.lastSyncedServerSeq;
+        return describeSyncState(checkpoint, maxServerSeq);
+      },
+    },
+    {
+      key: "actions",
+      header: "",
+      render: (device) => {
+        if (device.revokedAt) return null;
+        const isMe = device.deviceId === deviceId;
+        const isActive = activeInfo?.activeDeviceId === device.deviceId;
+        const busy = busyDeviceId === device.deviceId;
+        const isRenaming = renamingDeviceId === device.deviceId;
+        return (
+          <div className="ui-inline-actions">
+            {isMe && !isActive && (
+              <Button size="sm" variant="primary" disabled={busy} onClick={handleMakeActive}>
+                {activeInfo?.requestingIsPrimary ? "Take over as active" : "Make this device active"}
+              </Button>
+            )}
+            {!device.isPrimary && (
+              <Button size="sm" variant="secondary" disabled={busy} onClick={() => handleSetPrimary(device.deviceId).catch(() => {})}>
+                Set as primary
+              </Button>
+            )}
+            {isRenaming ? (
+              <>
+                <Button size="sm" variant="primary" disabled={busy} onClick={() => handleConfirmRename(device.deviceId)}>
+                  Save
+                </Button>
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => setRenamingDeviceId(null)}>
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" variant="secondary" disabled={busy} onClick={() => startRename(device)}>
+                Rename
+              </Button>
+            )}
+            <Button size="sm" variant="danger" loading={busy} onClick={() => handleRevoke(device)}>
+              Revoke
+            </Button>
+          </div>
+        );
+      },
+    },
+  ];
 
   return (
-    <div className="card">
-      <h2 style={{ fontSize: 16, marginTop: 0 }}>Devices</h2>
-      <p className="muted">
-        Every device registered for this business — who's active, who's
-        primary, and how caught-up each one is.
-      </p>
-      {isOwner && (
+    <Card
+      title="Devices"
+      description="Every device registered for this business — who's active, who's primary, and how caught-up each one is."
+    >
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
+      {isOwner && !loadError && (
         <TabStrip
           tabs={[
             { id: "my", label: "My Devices" },
@@ -214,119 +333,21 @@ export function DevicesPanel({ db, businessId, deviceId, dek }: Props): JSX.Elem
           onChange={setScopeTab}
         />
       )}
-      {devices === null ? (
-        <p className="muted">Loading…</p>
-      ) : (
-        devices
-          .filter((device) => {
-            if (isOwner && scopeTab === "all") return true;
-            // Non-Owner, or Owner's own "My Devices" tab: scope to the
-            // signed-in user's own membership (Vol 12_1 §5b). While the
-            // membership lookup is still in flight, hide every row
-            // rather than briefly showing every member's devices — the
-            // AccessContext doc comment calls this exact flash out for
-            // Owner-only UI, and it applies equally here since scoping
-            // is enforced client-side, not by the devices query itself
-            // (getAllDevices returns every device for the business).
-            // Once the lookup has resolved (membershipChecked), a null
-            // myMembership is the intentional dev-bypass/unrestricted
-            // path and stays unrestricted, as before.
-            if (!membershipChecked) return false;
-            if (!myMembership) return true;
-            return device.businessMembershipId === myMembership.id;
-          })
-          .map((device) => {
-          const isMe = device.deviceId === deviceId;
-          const isRevoked = !!device.revokedAt;
-          const isActive = !isRevoked && activeInfo?.activeDeviceId === device.deviceId;
-          const status = isRevoked ? "Revoked" : isActive ? "Active" : "Read-only";
-          const checkpoint = isMe ? myCheckpoint : device.lastSyncedServerSeq;
-          const syncState = isRevoked ? "—" : describeSyncState(checkpoint, maxServerSeq);
-          const busy = busyDeviceId === device.deviceId;
-          const isRenaming = renamingDeviceId === device.deviceId;
-
-          return (
-            <div
-              key={device.deviceId}
-              style={{ borderTop: "1px solid #e2e2e5", paddingTop: 10, marginTop: 8 }}
-            >
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                {isRenaming ? (
-                  <input
-                    value={renameDraft}
-                    onChange={(e) => setRenameDraft(e.target.value)}
-                    style={{ padding: 6, flex: 1 }}
-                    autoFocus
-                  />
-                ) : (
-                  <strong>
-                    {device.deviceLabel}
-                    {isMe ? " (this device)" : ""}
-                  </strong>
-                )}
-                {device.isPrimary && <span style={{ color: "#b8860b" }}>★ Primary</span>}
-              </div>
-
-              <p className="muted" style={{ margin: "4px 0" }}>
-                {describePlatform(device.platform)} · {status} · {syncState}
-              </p>
-              <p className="muted" style={{ margin: "4px 0" }}>
-                Last seen {relativeTime(device.lastSeenAt)} · Registered{" "}
-                {formatDate(device.registeredAt)}
-              </p>
-              {isActive && activeInfo && (
-                <p className="muted" style={{ margin: "4px 0" }}>
-                  {describeReadOnlyReason({
-                    activeDeviceLabel: activeInfo.activeDeviceLabel,
-                    activeDeviceIsPrimary: activeInfo.activeDeviceIsPrimary,
-                  })}
-                </p>
-              )}
-
-              {!isRevoked && (
-                <div className="row" style={{ marginTop: 4 }}>
-                  {isMe && !isActive && (
-                    <button onClick={handleMakeActive} disabled={busy}>
-                      {activeInfo?.requestingIsPrimary ? "Take over as active" : "Make this device active"}
-                    </button>
-                  )}
-                  {!device.isPrimary && (
-                    <button
-                      onClick={() => handleSetPrimary(device.deviceId).catch(() => {})}
-                      disabled={busy}
-                    >
-                      Set as primary
-                    </button>
-                  )}
-                  {isRenaming ? (
-                    <>
-                      <button onClick={() => handleConfirmRename(device.deviceId)} disabled={busy}>
-                        Save
-                      </button>
-                      <button onClick={() => setRenamingDeviceId(null)} disabled={busy}>
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <button onClick={() => startRename(device)} disabled={busy}>
-                      Rename
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleRevoke(device)}
-                    disabled={busy}
-                    style={{ color: "#c0392b", borderColor: "#c0392b" }}
-                  >
-                    {busy ? "…" : "Revoke"}
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })
+      {!loadError && (
+        <DataTable
+          caption="Registered devices"
+          columns={columns}
+          rows={visibleDevices}
+          rowKey={(d) => d.deviceId}
+          empty={<div className="ui-table-state">No devices to show.</div>}
+        />
       )}
-      {actionError && <p className="error">{actionError}</p>}
-    </div>
+      {actionError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {actionError}
+        </p>
+      )}
+    </Card>
   );
 }
 

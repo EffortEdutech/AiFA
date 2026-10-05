@@ -27,6 +27,9 @@
  * The Devices panel (Vol 12_1 §8) is unchanged from Sprint 19/38 —
  * still rendered below, per Vol 12_2 §5.4's "low-risk, mostly
  * relocation" instruction.
+ *
+ * UI polish Phase 4: presentation only — shared card, labelled fields and
+ * buttons. Same data calls, gating and copy.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -45,6 +48,7 @@ import { DevicesPanel } from "../../components/DevicesPanel";
 // in place, unchanged, ready to be wired into an Operator-only surface.
 import { signOut } from "../../lib/auth";
 import { getGrantedCapabilitiesForDomain } from "../../lib/membership";
+import { Button, Card, Field, PageHeader } from "../../ui";
 import { useAccess } from "../AccessContext";
 
 interface Props {
@@ -152,119 +156,166 @@ export function BusinessSettingsPage({ db, businessId, deviceId, dek }: Props): 
     }
   }
 
+  const kv = (label: string, value: string): JSX.Element => (
+    <li className="ui-move">
+      <span className="ui-muted">{label}</span>
+      <strong>{value}</strong>
+    </li>
+  );
+
   return (
-    <>
-      <div className="card">
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2 style={{ fontSize: 16, marginTop: 0 }}>Business profile</h2>
-          {canConfigure && !editingProfile && <button onClick={() => setEditingProfile(true)}>Edit</button>}
-        </div>
-        {loadError && <p className="error">{loadError}</p>}
+    <div className="aifa-page">
+      <PageHeader title="Settings" />
+
+      <Card
+        title="Business profile"
+        actions={
+          canConfigure && !editingProfile ? (
+            <Button size="sm" variant="secondary" onClick={() => setEditingProfile(true)}>
+              Edit
+            </Button>
+          ) : undefined
+        }
+      >
+        {loadError && (
+          <p className="aifa-alert aifa-alert--danger" role="alert">
+            {loadError}
+          </p>
+        )}
         {!settings ? (
-          <p className="muted">Loading…</p>
+          <p className="ui-muted">{loadError ? "Not available." : "Loading…"}</p>
         ) : editingProfile ? (
-          <div>
-            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-              <input placeholder="Business name" value={businessName} onChange={(e) => setBusinessName(e.target.value)} style={{ padding: 6 }} />
-              <input placeholder="Industry" value={industry} onChange={(e) => setIndustry(e.target.value)} style={{ padding: 6 }} />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!profileBusy) void handleSaveProfile();
+            }}
+          >
+            <div className="ui-form-grid">
+              <Field label="Business name">
+                {(p) => <input {...p} className="ui-input" value={businessName} onChange={(e) => setBusinessName(e.target.value)} />}
+              </Field>
+              <Field label="Industry">
+                {(p) => <input {...p} className="ui-input" value={industry} onChange={(e) => setIndustry(e.target.value)} />}
+              </Field>
             </div>
-            <div className="row" style={{ marginTop: 8 }}>
-              <button onClick={() => void handleSaveProfile()} disabled={profileBusy}>
+            <div className="ui-form-actions">
+              <Button type="submit" variant="primary" loading={profileBusy}>
                 {profileBusy ? "Saving…" : "Save"}
-              </button>
-              <button onClick={() => setEditingProfile(false)} disabled={profileBusy}>
+              </Button>
+              <Button variant="secondary" disabled={profileBusy} onClick={() => setEditingProfile(false)}>
                 Cancel
-              </button>
+              </Button>
             </div>
-            {profileError && <p className="error">{profileError}</p>}
-          </div>
+            {profileError && (
+              <p className="aifa-alert aifa-alert--danger" role="alert">
+                {profileError}
+              </p>
+            )}
+          </form>
         ) : (
-          <dl>
-            <dt className="muted">Business name</dt>
-            <dd>{settings.business_name ?? "—"}</dd>
-            <dt className="muted">Industry</dt>
-            <dd>{settings.industry ?? "—"}</dd>
-          </dl>
+          <ul className="ui-move-list">
+            {kv("Business name", settings.business_name ?? "—")}
+            {kv("Industry", settings.industry ?? "—")}
+          </ul>
         )}
         {!canConfigure && (
-          <p className="muted">
+          <p className="ui-muted">
             Editing requires `settings: configure` access — contact an Owner or Bookkeeper to change this.
           </p>
         )}
-      </div>
+      </Card>
 
-      <div className="card">
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2 style={{ fontSize: 16, marginTop: 0 }}>Notifications</h2>
-          {canConfigure && !editingNotifications && <button onClick={() => setEditingNotifications(true)}>Edit</button>}
-        </div>
+      <Card
+        title="Notifications"
+        actions={
+          canConfigure && !editingNotifications ? (
+            <Button size="sm" variant="secondary" onClick={() => setEditingNotifications(true)}>
+              Edit
+            </Button>
+          ) : undefined
+        }
+      >
         {!settings ? (
-          <p className="muted">Loading…</p>
+          <p className="ui-muted">{loadError ? "Not available." : "Loading…"}</p>
         ) : editingNotifications ? (
-          <div>
-            <label className="row" style={{ gap: 4 }}>
-              <input type="checkbox" checked={quietHoursEnabled} onChange={(e) => setQuietHoursEnabled(e.target.checked)} />
-              Quiet hours enabled
-            </label>
-            <div className="row" style={{ gap: 8, marginTop: 6 }}>
-              <label>
-                Start hour{" "}
-                <input
-                  type="number"
-                  min={0}
-                  max={23}
-                  value={quietHoursStartHour}
-                  onChange={(e) => setQuietHoursStartHour(Number(e.target.value))}
-                  style={{ width: 60, padding: 4 }}
-                />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!notificationsBusy) void handleSaveNotifications();
+            }}
+          >
+            <div className="ui-check-group">
+              <label className="ui-check">
+                <input type="checkbox" checked={quietHoursEnabled} onChange={(e) => setQuietHoursEnabled(e.target.checked)} />
+                Quiet hours enabled
               </label>
-              <label>
-                End hour{" "}
+              <label className="ui-check">
+                <input type="checkbox" checked={notifyActionNeeded} onChange={(e) => setNotifyActionNeeded(e.target.checked)} />
+                Notify: action needed
+              </label>
+              <label className="ui-check">
                 <input
-                  type="number"
-                  min={0}
-                  max={23}
-                  value={quietHoursEndHour}
-                  onChange={(e) => setQuietHoursEndHour(Number(e.target.value))}
-                  style={{ width: 60, padding: 4 }}
+                  type="checkbox"
+                  checked={notifyConfirmationRequest}
+                  onChange={(e) => setNotifyConfirmationRequest(e.target.checked)}
                 />
+                Notify: confirmation request
               </label>
             </div>
-            <label className="row" style={{ gap: 4, marginTop: 6 }}>
-              <input type="checkbox" checked={notifyActionNeeded} onChange={(e) => setNotifyActionNeeded(e.target.checked)} />
-              Notify: action needed
-            </label>
-            <label className="row" style={{ gap: 4, marginTop: 6 }}>
-              <input
-                type="checkbox"
-                checked={notifyConfirmationRequest}
-                onChange={(e) => setNotifyConfirmationRequest(e.target.checked)}
-              />
-              Notify: confirmation request
-            </label>
-            <div className="row" style={{ marginTop: 8 }}>
-              <button onClick={() => void handleSaveNotifications()} disabled={notificationsBusy}>
+            <div className="ui-form-grid" style={{ marginTop: 12 }}>
+              <Field label="Start hour">
+                {(p) => (
+                  <input
+                    {...p}
+                    className="ui-input"
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={quietHoursStartHour}
+                    onChange={(e) => setQuietHoursStartHour(Number(e.target.value))}
+                  />
+                )}
+              </Field>
+              <Field label="End hour">
+                {(p) => (
+                  <input
+                    {...p}
+                    className="ui-input"
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={quietHoursEndHour}
+                    onChange={(e) => setQuietHoursEndHour(Number(e.target.value))}
+                  />
+                )}
+              </Field>
+            </div>
+            <div className="ui-form-actions">
+              <Button type="submit" variant="primary" loading={notificationsBusy}>
                 {notificationsBusy ? "Saving…" : "Save"}
-              </button>
-              <button onClick={() => setEditingNotifications(false)} disabled={notificationsBusy}>
+              </Button>
+              <Button variant="secondary" disabled={notificationsBusy} onClick={() => setEditingNotifications(false)}>
                 Cancel
-              </button>
+              </Button>
             </div>
-            {notificationsError && <p className="error">{notificationsError}</p>}
-          </div>
+            {notificationsError && (
+              <p className="aifa-alert aifa-alert--danger" role="alert">
+                {notificationsError}
+              </p>
+            )}
+          </form>
         ) : (
-          <dl>
-            <dt className="muted">Quiet hours</dt>
-            <dd>
-              {settings.quiet_hours_enabled ? `${settings.quiet_hours_start_hour}:00–${settings.quiet_hours_end_hour}:00` : "Off"}
-            </dd>
-            <dt className="muted">Notify: action needed</dt>
-            <dd>{settings.notify_action_needed ? "On" : "Off"}</dd>
-            <dt className="muted">Notify: confirmation request</dt>
-            <dd>{settings.notify_confirmation_request ? "On" : "Off"}</dd>
-          </dl>
+          <ul className="ui-move-list">
+            {kv(
+              "Quiet hours",
+              settings.quiet_hours_enabled ? `${settings.quiet_hours_start_hour}:00–${settings.quiet_hours_end_hour}:00` : "Off",
+            )}
+            {kv("Notify: action needed", settings.notify_action_needed ? "On" : "Off")}
+            {kv("Notify: confirmation request", settings.notify_confirmation_request ? "On" : "Off")}
+          </ul>
         )}
-      </div>
+      </Card>
 
       <WebsiteSettingsCard businessId={businessId} canConfigure={canConfigure} />
 
@@ -272,14 +323,16 @@ export function BusinessSettingsPage({ db, businessId, deviceId, dek }: Props): 
 
       <BYOKSettingsCard />
 
-      <div className="card">
-        <p className="muted">
+      <Card title="This browser">
+        <p className="ui-muted" style={{ marginTop: 0 }}>
           This browser is registered as device <code>{deviceId.slice(0, 8)}…</code>.
         </p>
-        <button onClick={() => void signOut()}>Sign out</button>
-      </div>
+        <Button variant="secondary" icon="logout" onClick={() => void signOut()}>
+          Sign out
+        </Button>
+      </Card>
 
       <DevicesPanel db={db} businessId={businessId} deviceId={deviceId} dek={dek} />
-    </>
+    </div>
   );
 }

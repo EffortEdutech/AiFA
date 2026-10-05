@@ -12,9 +12,13 @@
  * the backend and DNS-verification flow behind them still work and are
  * simply reached from an Operator-only surface once one exists, not from
  * here.
+ *
+ * UI polish Phase 4: presentation only — shared card, labelled fields and
+ * buttons. Same data calls, gating and copy.
  */
 import { useEffect, useState } from "react";
 
+import { Button, Card, Field } from "../ui";
 import { getBusinessSlug, publicSiteUrlForSlug, updateBusinessSlug } from "../lib/businessSlug";
 
 interface Props {
@@ -77,70 +81,70 @@ export function PublicSiteLinkCard({ businessId, canConfigure }: Props): JSX.Ele
   }
 
   return (
-    <div className="card">
-      <h2 style={{ fontSize: 16, marginTop: 0 }}>Public Site</h2>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Every business gets a public landing page on AiFA automatically — no domain or setup needed. Share this link
-        or a QR code with your customers.
-      </p>
-
-      {loadError && <p className="error">{loadError}</p>}
+    <Card
+      title="Public Site"
+      description="Every business gets a public landing page on AiFA automatically — no domain or setup needed. Share this link or a QR code with your customers."
+    >
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
       {loading ? (
-        <p className="muted">Loading…</p>
+        <p className="ui-muted">Loading…</p>
       ) : editing ? (
-        <div>
-          <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <span className="muted">.../site/</span>
-            <input
-              placeholder="your-business-name"
-              value={slugInput}
-              onChange={(e) => setSlugInput(e.target.value)}
-              style={{ padding: 6, flex: "1 1 200px" }}
-            />
-          </div>
-          <div className="row" style={{ marginTop: 8 }}>
-            <button onClick={() => void handleSave()} disabled={saveBusy || slugInput.trim() === ""}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!saveBusy && slugInput.trim() !== "") void handleSave();
+          }}
+        >
+          <Field label="Link name" hint=".../site/your-business-name">
+            {(p) => <input {...p} className="ui-input" placeholder="your-business-name" value={slugInput} onChange={(e) => setSlugInput(e.target.value)} />}
+          </Field>
+          <div className="ui-form-actions">
+            <Button type="submit" variant="primary" loading={saveBusy} disabled={slugInput.trim() === ""}>
               {saveBusy ? "Saving…" : "Save"}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={saveBusy}
               onClick={() => {
                 setSlugInput(slug);
                 setEditing(false);
                 setSaveError(null);
               }}
-              disabled={saveBusy}
             >
               Cancel
-            </button>
+            </Button>
           </div>
-          {saveError && <p className="error">{saveError}</p>}
-        </div>
+          {saveError && (
+            <p className="aifa-alert aifa-alert--danger" role="alert">
+              {saveError}
+            </p>
+          )}
+        </form>
       ) : (
         <div>
-          <div
-            className="row"
-            style={{
-              justifyContent: "space-between",
-              alignItems: "center",
-              border: "1px solid var(--border, #333)",
-              borderRadius: 8,
-              padding: 12,
-              gap: 8,
-              flexWrap: "wrap",
-            }}
-          >
+          <div className="ui-panel" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <code style={{ wordBreak: "break-all", fontSize: 13 }}>{publicSiteUrlForSlug(slug)}</code>
-            <div className="row" style={{ gap: 6 }}>
-              <button onClick={() => void handleCopy()}>{copied ? "Copied!" : "Copy link"}</button>
-              {canConfigure && <button onClick={() => setEditing(true)}>Edit</button>}
+            <div className="ui-inline-actions">
+              <Button size="sm" variant="secondary" onClick={() => void handleCopy()}>
+                {copied ? "Copied!" : "Copy link"}
+              </Button>
+              {canConfigure && (
+                <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
+                  Edit
+                </Button>
+              )}
             </div>
           </div>
-          <p className="muted" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
+          <p className="ui-muted">
             Want your own domain instead (e.g. www.yourbusiness.com)? Contact us — a custom domain is set up for you
             on request.
           </p>
         </div>
       )}
-    </div>
+    </Card>
   );
 }

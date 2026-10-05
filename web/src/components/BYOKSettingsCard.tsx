@@ -6,8 +6,8 @@
  * own AI provider keys, stored encrypted in the Gateway's vault — never in
  * this app's bundle or database. Same client (`GatewayCredentialsClient`
  * from `@aifa/core`) and wire protocol as mobile; only the rendering is
- * web-native (plain `<input>`/`<button>`, this app's existing `card`/
- * `row`/`muted`/`error` CSS classes) instead of React Native primitives.
+ * web-native (shared ui kit: Card, Button, Field) instead of React Native
+ * primitives. UI polish Phase 4: presentation only.
  *
  * Rendered only when `VITE_AI_GATEWAY_URL` is configured — same
  * graceful-degradation pattern as `aiProvider.ts`'s own Gateway/local
@@ -30,6 +30,7 @@ import {
 } from "@aifa/core/ai/gatewayCredentialsClient";
 import { useCallback, useEffect, useState } from "react";
 
+import { Button, Card, Field, StatusPill } from "../ui";
 import { getCurrentSession } from "../lib/auth";
 
 const PROVIDERS = ["openai", "anthropic", "gemini", "openrouter"] as const;
@@ -129,75 +130,87 @@ export function BYOKSettingsCard(): JSX.Element | null {
   }
 
   return (
-    <div className="card">
-      <h2 style={{ fontSize: 16, marginTop: 0 }}>AI provider keys</h2>
-      <p className="muted">
-        Add your own API key for a provider to use it for AI classification, image/PDF extraction,
-        and the AI Workspace, instead of this app&apos;s built-in model. Keys are stored encrypted
-        in the Gateway, never on this device or in this app.
-      </p>
-
-      {error && <p className="error">{error}</p>}
+    <Card
+      title="AI provider keys"
+      description="Add your own API key for a provider to use it for AI classification, image/PDF extraction, and the AI Workspace, instead of this app's built-in model. Keys are stored encrypted in the Gateway, never on this device or in this app."
+    >
+      {error && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {error}
+        </p>
+      )}
 
       {loading ? (
-        <p className="muted">Loading…</p>
+        <p className="ui-muted">Loading…</p>
       ) : (
-        PROVIDERS.map((provider) => {
-          const existing = credentials.find((c) => c.provider === provider);
-          const isEditing = editingProvider === provider;
-          return (
-            <div
-              key={provider}
-              className="row"
-              style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid #e2e2e2" }}
-            >
-              <div style={{ flex: "1 1 auto", minWidth: 200 }}>
-                <div className="row" style={{ justifyContent: "space-between" }}>
+        <ul className="ui-move-list">
+          {PROVIDERS.map((provider) => {
+            const existing = credentials.find((c) => c.provider === provider);
+            const isEditing = editingProvider === provider;
+            return (
+              <li key={provider} className="ui-move" style={{ alignItems: "flex-start", flexWrap: "wrap" }}>
+                <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                   <strong>{PROVIDER_LABELS[provider]}</strong>
-                  <span className="muted">
-                    {existing ? `•••• ${existing.key_last4 ?? "????"}` : "Not configured"}
-                  </span>
-                </div>
-
-                {isEditing ? (
-                  <div style={{ marginTop: 6 }}>
-                    <input
-                      type="password"
-                      autoCapitalize="off"
-                      autoComplete="off"
-                      placeholder={`${PROVIDER_LABELS[provider]} API key`}
-                      value={keyInput}
-                      onChange={(e) => setKeyInput(e.target.value)}
-                      style={{ padding: 6, width: "100%", maxWidth: 360 }}
-                    />
-                    <div className="row" style={{ marginTop: 6 }}>
-                      <button onClick={() => void handleSave(provider)} disabled={saving || !keyInput.trim()}>
-                        {saving ? "Saving…" : "Save"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingProvider(null);
-                          setKeyInput("");
-                        }}
-                        disabled={saving}
-                      >
-                        Cancel
-                      </button>
-                    </div>
+                  <div className="ui-cell-sub">
+                    {existing ? <StatusPill status="active" label={`•••• ${existing.key_last4 ?? "????"}`} tone="success" /> : "Not configured"}
                   </div>
-                ) : (
-                  <div className="row" style={{ marginTop: 6 }}>
-                    <button onClick={() => setEditingProvider(provider)}>
+                  {isEditing && (
+                    <form
+                      style={{ marginTop: 8 }}
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (!saving && keyInput.trim()) void handleSave(provider);
+                      }}
+                    >
+                      <Field label={`${PROVIDER_LABELS[provider]} API key`}>
+                        {(p) => (
+                          <input
+                            {...p}
+                            className="ui-input"
+                            type="password"
+                            autoCapitalize="off"
+                            autoComplete="off"
+                            value={keyInput}
+                            onChange={(e) => setKeyInput(e.target.value)}
+                          />
+                        )}
+                      </Field>
+                      <div className="ui-form-actions">
+                        <Button type="submit" variant="primary" size="sm" loading={saving} disabled={!keyInput.trim()}>
+                          {saving ? "Saving…" : "Save"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={saving}
+                          onClick={() => {
+                            setEditingProvider(null);
+                            setKeyInput("");
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+                {!isEditing && (
+                  <div className="ui-inline-actions">
+                    <Button size="sm" variant="secondary" onClick={() => setEditingProvider(provider)}>
                       {existing ? "Replace" : "Add key"}
-                    </button>
-                    {existing && <button onClick={() => void handleRemove(existing.id)}>Remove</button>}
+                    </Button>
+                    {existing && (
+                      <Button size="sm" variant="danger" onClick={() => void handleRemove(existing.id)}>
+                        Remove
+                      </Button>
+                    )}
                   </div>
                 )}
-              </div>
-            </div>
-          );
-        })
+              </li>
+            );
+          })}
+        </ul>
       )}
-    </div>
+    </Card>
   );
 }
