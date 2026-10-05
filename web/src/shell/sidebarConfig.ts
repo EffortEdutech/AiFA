@@ -16,6 +16,8 @@
  */
 import type { Domain } from "@aifa/core/sync/approvalEngineTransport";
 
+import type { IconName } from "../ui";
+
 export interface SidebarItem {
   id: string;
   label: string;
@@ -33,12 +35,15 @@ export interface SidebarItem {
 export interface SidebarSection {
   id: string;
   label: string;
+  /** Icon shown for this section when the sidebar is collapsed to its icon rail. */
+  icon: IconName;
   items: SidebarItem[];
 }
 
 export const SIDEBAR: SidebarSection[] = [
   {
     id: "overview",
+    icon: "home",
     label: "Overview",
     items: [
       { id: "business-overview", label: "Business Overview", domain: null, sprint: 48, status: "existing" },
@@ -56,6 +61,7 @@ export const SIDEBAR: SidebarSection[] = [
     // Approvals/Devices — capture spans every domain, gated per-submission
     // by each domain's own capability check inside useCaptureRouterCore.
     id: "capture",
+    icon: "zap",
     label: "Capture",
     items: [
       { id: "quick-capture", label: "Quick Capture (AI)", domain: null, sprint: 53, status: "existing" },
@@ -64,6 +70,7 @@ export const SIDEBAR: SidebarSection[] = [
   },
   {
     id: "sales",
+    icon: "receipt",
     label: "Sales",
     items: [
       { id: "parties", label: "Parties (Customers/Suppliers)", domain: "sales", sprint: 39, status: "existing" },
@@ -76,6 +83,7 @@ export const SIDEBAR: SidebarSection[] = [
   },
   {
     id: "purchases-cash",
+    icon: "wallet",
     label: "Purchases & Cash",
     items: [
       { id: "payment-vouchers", label: "Payment Vouchers", domain: "expense", sprint: 41, status: "existing" },
@@ -86,6 +94,7 @@ export const SIDEBAR: SidebarSection[] = [
   },
   {
     id: "inventory",
+    icon: "box",
     label: "Inventory",
     items: [
       { id: "products-stock", label: "Products & Stock", domain: "inventory", sprint: 42, status: "existing" },
@@ -94,6 +103,7 @@ export const SIDEBAR: SidebarSection[] = [
   },
   {
     id: "accounting",
+    icon: "book",
     label: "Accounting",
     items: [
       { id: "chart-of-accounts", label: "Chart of Accounts", domain: "settings", sprint: 39, status: "existing" },
@@ -103,6 +113,7 @@ export const SIDEBAR: SidebarSection[] = [
   },
   {
     id: "compliance",
+    icon: "shield",
     label: "Compliance",
     items: [
       { id: "einvoice-sst", label: "e-Invoice & SST", domain: "tax_compliance", sprint: 44, status: "existing" },
@@ -110,6 +121,7 @@ export const SIDEBAR: SidebarSection[] = [
   },
   {
     id: "people",
+    icon: "users",
     label: "People",
     items: [
       { id: "payroll", label: "Payroll", domain: "payroll", sprint: 45, status: "existing" },
@@ -119,6 +131,7 @@ export const SIDEBAR: SidebarSection[] = [
   },
   {
     id: "legal",
+    icon: "scale",
     label: "Legal",
     items: [
       { id: "contracts-alerts", label: "Contracts & Alerts", domain: "legal_contract", sprint: 47, status: "existing" },
@@ -127,6 +140,7 @@ export const SIDEBAR: SidebarSection[] = [
   },
   {
     id: "team",
+    icon: "briefcase",
     label: "Team",
     items: [
       { id: "members-roles", label: "Members & Roles", domain: null, sprint: 38, status: "existing" },
@@ -135,6 +149,7 @@ export const SIDEBAR: SidebarSection[] = [
   },
   {
     id: "settings",
+    icon: "sliders",
     label: "Settings",
     items: [
       { id: "devices", label: "Devices", domain: null, sprint: 38, status: "existing" },

@@ -7,6 +7,7 @@ import {
 import type { SqlDb } from "@aifa/core/db/types";
 
 import { requestActivation, requestPrimaryTakeover, type ActiveDeviceInfo } from "../lib/syncService";
+import { Button, ConfirmDialog } from "../ui";
 
 interface Props {
   db: SqlDb;
@@ -21,14 +22,21 @@ interface Props {
  * Web read-only banner — Sprint 19, the web counterpart to
  * app/src/components/ReadOnlyBanner.tsx. Same handoff logic
  * (resolveActivationConfirmation/describeReadOnlyReason from
- * @aifa/core/sync/handoff), `window.confirm` instead of RN's Alert.alert
- * for the same reason DevicesPanel.tsx (web) uses it — no modal
- * component exists in this package, and this is a smaller investment
- * than building one for a single confirmation dialog.
+ * @aifa/core/sync/handoff).
+ *
+ * UI polish Phase 2: the confirmation that used `window.confirm` now uses
+ * the ui kit's ConfirmDialog (same title and message from the handoff
+ * logic, themed and keyboard-safe). The read-only notice itself — the
+ * disclosure that this device cannot write — is unchanged in wording.
  */
 export function ReadOnlyBanner({ db, businessId, deviceId, dek, info, onActivated }: Props): JSX.Element | null {
   const [isRequesting, setIsRequesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+  } | null>(null);
 
   if (info.isActiveDevice) return null;
 
@@ -63,10 +71,11 @@ export function ReadOnlyBanner({ db, businessId, deviceId, dek, info, onActivate
       return;
     }
 
-    const proceed = window.confirm(
-      [confirmation.title, confirmation.message].filter(Boolean).join("\n\n"),
-    );
-    if (proceed) performActivation().catch(() => {});
+    setPendingConfirmation({
+      title: confirmation.title || "Make this device active?",
+      message: confirmation.message,
+      confirmLabel: confirmation.confirmLabel || "Confirm",
+    });
   };
 
   const reasonText = describeReadOnlyReason({
@@ -75,39 +84,29 @@ export function ReadOnlyBanner({ db, businessId, deviceId, dek, info, onActivate
   });
 
   return (
-    <div
-      role="alert"
-      style={{
-        background: "#4a1f0a",
-        color: "#fff6e5",
-        padding: "6px 12px",
-        textAlign: "center",
-        fontSize: 12,
-      }}
-    >
-      <span>{reasonText}</span>{" "}
-      <button
-        onClick={handleRequestActivation}
-        disabled={isRequesting}
-        style={{
-          marginLeft: 8,
-          fontSize: 12,
-          padding: "2px 8px",
-          background: "transparent",
-          color: "#fff6e5",
-          border: "1px solid #fff6e5",
-          borderRadius: 4,
+    <>
+      <div role="alert" className="aifa-banner aifa-banner--warning">
+        <span>{reasonText}</span>
+        <Button size="sm" variant="secondary" onClick={handleRequestActivation} loading={isRequesting}>
+          {isRequesting
+            ? "Working…"
+            : info.requestingIsPrimary
+              ? "Take over as active device"
+              : "Make this device active"}
+        </Button>
+        {error && <span className="aifa-banner__error">{error}</span>}
+      </div>
+      <ConfirmDialog
+        open={pendingConfirmation !== null}
+        title={pendingConfirmation?.title ?? ""}
+        message={pendingConfirmation?.message ?? ""}
+        confirmLabel={pendingConfirmation?.confirmLabel}
+        onCancel={() => setPendingConfirmation(null)}
+        onConfirm={() => {
+          setPendingConfirmation(null);
+          performActivation().catch(() => {});
         }}
-      >
-        {isRequesting
-          ? "Working…"
-          : info.requestingIsPrimary
-            ? "Take over as active device"
-            : "Make this device active"}
-      </button>
-      {error && (
-        <div style={{ color: "#ffb4a3", fontSize: 11, marginTop: 4 }}>{error}</div>
-      )}
-    </div>
+      />
+    </>
   );
 }

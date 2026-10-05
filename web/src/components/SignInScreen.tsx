@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 
 import { signIn, signUp } from "../lib/auth";
+import { AuthLayout } from "../shell/AuthLayout";
+import { Button, Field } from "../ui";
 
 interface Props {
   /**
@@ -17,6 +19,9 @@ interface Props {
  * lib/auth.ts's header comment for why). "Create account" and "Sign in"
  * are two explicit modes rather than one combined call, since Supabase's
  * password API has no OTP-style implicit-create-on-sign-in shape.
+ *
+ * UI polish Phase 2: presentation only -- a real <form> (Enter submits),
+ * labelled fields, themed alerts. Same auth calls and same copy.
  */
 export function SignInScreen({ onDevBypass }: Props): JSX.Element {
   const [mode, setMode] = useState<"signIn" | "signUp">("signIn");
@@ -46,54 +51,84 @@ export function SignInScreen({ onDevBypass }: Props): JSX.Element {
     // session and App.tsx re-renders into the next step automatically.
   }
 
+  function onSubmit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (busy || !email || !password) return;
+    void handleSubmit();
+  }
+
+  const isSignUp = mode === "signUp";
+
   return (
-    <div className="card" style={{ maxWidth: 360, margin: "80px auto" }}>
-      <h1 style={{ fontSize: 20 }}>{mode === "signUp" ? "Create your AiFA account" : "Sign in to AiFA"}</h1>
-      <p className="muted">
-        Same email/password account as the mobile app — no separate web account.
-      </p>
-      <input
-        type="email"
-        placeholder="you@business.com"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        autoComplete="email"
-        style={{ width: "100%", padding: 8, marginBottom: 8 }}
-      />
-      <input
-        type="password"
-        placeholder="Password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        autoComplete={mode === "signUp" ? "new-password" : "current-password"}
-        style={{ width: "100%", padding: 8, marginBottom: 8 }}
-      />
-      <button onClick={() => void handleSubmit()} disabled={busy || !email || !password}>
-        {busy ? (mode === "signUp" ? "Creating…" : "Signing in…") : mode === "signUp" ? "Create account" : "Sign in"}
-      </button>
-      <p className="muted" style={{ marginTop: 8 }}>
-        {mode === "signUp" ? "Already have an account?" : "New here?"}{" "}
-        <button
-          onClick={() => {
-            setMode(mode === "signUp" ? "signIn" : "signUp");
-            setError(null);
-            setInfo(null);
-          }}
-          style={{ padding: 0, background: "none", border: "none", textDecoration: "underline", cursor: "pointer" }}
-        >
-          {mode === "signUp" ? "Sign in instead" : "Create an account"}
-        </button>
-      </p>
-      {error && <p className="error">{error}</p>}
-      {info && <p className="muted">{info}</p>}
+    <AuthLayout
+      title={isSignUp ? "Create your AiFA account" : "Sign in to AiFA"}
+      description="Same email/password account as the mobile app — no separate web account."
+      footer={
+        <>
+          {isSignUp ? "Already have an account?" : "New here?"}{" "}
+          <button
+            type="button"
+            className="aifa-link-btn"
+            onClick={() => {
+              setMode(isSignUp ? "signIn" : "signUp");
+              setError(null);
+              setInfo(null);
+            }}
+          >
+            {isSignUp ? "Sign in instead" : "Create an account"}
+          </button>
+        </>
+      }
+    >
+      <form className="aifa-auth__form" onSubmit={onSubmit}>
+        <Field label="Email">
+          {(p) => (
+            <input
+              {...p}
+              className="ui-input"
+              type="email"
+              placeholder="you@business.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+            />
+          )}
+        </Field>
+        <Field label="Password">
+          {(p) => (
+            <input
+              {...p}
+              className="ui-input"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={isSignUp ? "new-password" : "current-password"}
+            />
+          )}
+        </Field>
+        {error && (
+          <p className="aifa-alert aifa-alert--danger" role="alert">
+            {error}
+          </p>
+        )}
+        {info && (
+          <p className="aifa-alert aifa-alert--info" role="status">
+            {info}
+          </p>
+        )}
+        <div className="aifa-auth__actions">
+          <Button type="submit" variant="primary" loading={busy} disabled={!email || !password}>
+            {busy ? (isSignUp ? "Creating…" : "Signing in…") : isSignUp ? "Create account" : "Sign in"}
+          </Button>
+        </div>
+      </form>
       {import.meta.env.DEV && onDevBypass && (
-        <button
-          onClick={() => onDevBypass("00000000-dev0-0000-0000-000000000001")}
-          style={{ marginTop: 16, opacity: 0.7 }}
-        >
-          Skip sign-in (dev only, no backend)
-        </button>
+        <div className="aifa-auth__actions">
+          <Button variant="ghost" onClick={() => onDevBypass("00000000-dev0-0000-0000-000000000001")}>
+            Skip sign-in (dev only, no backend)
+          </Button>
+        </div>
       )}
-    </div>
+    </AuthLayout>
   );
 }

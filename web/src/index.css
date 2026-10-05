@@ -71,102 +71,261 @@ input:disabled, select:disabled, textarea:disabled {
   font-weight: 600;
 }
 
-/* ===== Sprint 37 shell (Vol 12_2) ===== */
+/* ===== Sprint 37 shell (Vol 12_2), restyled by UI polish Phase 2 ===== */
 
-body { font-family: var(--aifa-font); font-size: var(--aifa-font-size-body); }
+body {
+  font-family: var(--aifa-font);
+  font-size: var(--aifa-font-size-body);
+  line-height: var(--aifa-line-height);
+}
 
-.aifa-shell { display: flex; flex-direction: column; height: 100vh; }
+.aifa-skip-link {
+  position: absolute;
+  left: 8px;
+  top: -48px;
+  z-index: 200;
+  padding: 8px 12px;
+  background: var(--aifa-surface);
+  color: var(--aifa-text);
+  border-radius: var(--aifa-radius-sm);
+  box-shadow: var(--aifa-shadow-md);
+  text-decoration: none;
+}
+.aifa-skip-link:focus { top: 8px; }
 
+/* Root column: banners (if any) stack above the shell, which fills the rest. */
+.aifa-app-root { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+.aifa-shell { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+
+/* ----- Brand ----- */
+.aifa-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.aifa-brand__mark {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--aifa-radius-sm);
+  background: var(--aifa-form-gold);
+  color: var(--aifa-primary-900);
+  font-weight: var(--aifa-font-weight-bold);
+  font-size: 15px;
+}
+.aifa-brand__name {
+  font-weight: var(--aifa-font-weight-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ----- Top bar ----- */
 .aifa-topbar {
+  position: relative;
+  z-index: 30;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--aifa-space-2);
   height: var(--aifa-topbar-height);
-  padding: 0 16px;
+  padding: 0 var(--aifa-space-4);
   background: var(--aifa-primary-900);
   color: #fff;
   flex-shrink: 0;
 }
-.aifa-hamburger {
-  background: none;
-  border: none;
-  font-size: 20px;
-  color: #fff;
-  padding: 4px 8px;
-}
-.aifa-topbar-title { font-weight: 600; }
+.aifa-topbar :focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .aifa-topbar-spacer { flex: 1; }
-.aifa-topbar-icon-btn {
-  background: none;
-  border: none;
+.aifa-topbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px;
+  background: transparent;
   color: #fff;
-  padding: 6px 10px;
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--aifa-radius-sm);
+  font-size: var(--aifa-font-size-sm);
 }
-.aifa-topbar-icon-btn:hover { background: var(--aifa-primary-800); }
+.aifa-topbar-btn--icon { width: 36px; justify-content: center; padding: 0; }
+.aifa-topbar-btn:hover:not(:disabled),
+.aifa-topbar-btn[aria-expanded="true"] { background: var(--aifa-primary-800); }
+.aifa-topbar-btn:disabled { opacity: 0.45; cursor: default; }
+
 .aifa-active-device-pill {
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--aifa-radius-pill);
   background: var(--aifa-primary-800);
   color: var(--aifa-primary-100);
+  font-size: var(--aifa-font-size-xs);
+  white-space: nowrap;
 }
-.aifa-active-device-pill--active {
-  background: var(--aifa-success-bg);
-  color: var(--aifa-success);
+.aifa-active-device-pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
 }
+.aifa-active-device-pill--active { background: var(--aifa-success-bg); color: var(--aifa-success); }
+.aifa-active-device-pill--active::before { opacity: 1; }
 
-.aifa-shell-body { display: flex; flex: 1; min-height: 0; }
+/* ----- Account menu ----- */
+.aifa-menu { position: relative; }
+.aifa-menu__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  min-width: 220px;
+  padding: 6px;
+  background: var(--aifa-surface);
+  color: var(--aifa-text);
+  border: 1px solid var(--aifa-border);
+  border-radius: var(--aifa-radius-md);
+  box-shadow: var(--aifa-shadow-md);
+}
+.aifa-menu__label {
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--aifa-border);
+  color: var(--aifa-text-muted);
+  font-size: var(--aifa-font-size-xs);
+  word-break: break-all;
+}
+.aifa-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--aifa-text);
+  border: none;
+  border-radius: var(--aifa-radius-sm);
+  text-align: left;
+}
+.aifa-menu__item:hover { background: var(--aifa-primary-50); }
+
+/* ----- Layout body, sidebar, rail, drawer ----- */
+.aifa-shell-body { position: relative; display: flex; flex: 1; min-height: 0; }
 
 .aifa-sidebar {
   width: var(--aifa-sidebar-width);
   flex-shrink: 0;
-  background: var(--aifa-primary-50);
+  padding: var(--aifa-space-3) var(--aifa-space-2);
+  background: var(--aifa-surface);
   border-right: 1px solid var(--aifa-border);
   overflow-y: auto;
-  padding: 12px 0;
   transition: width 0.15s ease;
 }
-.aifa-sidebar--collapsed { width: var(--aifa-sidebar-width-collapsed); }
-.aifa-sidebar-section { margin-bottom: 14px; }
+.aifa-sidebar--collapsed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: var(--aifa-sidebar-width-collapsed);
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.aifa-sidebar--drawer {
+  position: fixed;
+  top: var(--aifa-topbar-height);
+  bottom: 0;
+  left: 0;
+  z-index: 60;
+  width: min(280px, 85vw);
+  box-shadow: var(--aifa-shadow-lg);
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition: transform 0.2s ease, visibility 0s linear 0.2s;
+}
+.aifa-sidebar--drawer.aifa-sidebar--open {
+  transform: none;
+  visibility: visible;
+  transition: transform 0.2s ease;
+}
+.aifa-backdrop {
+  position: fixed;
+  inset: var(--aifa-topbar-height) 0 0 0;
+  z-index: 55;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.aifa-sidebar-section { margin-bottom: var(--aifa-space-3); }
 .aifa-sidebar-section-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  padding: 6px 10px;
   color: var(--aifa-text-muted);
-  padding: 4px 16px;
+  font-size: 11px;
+  font-weight: var(--aifa-font-weight-semibold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 .aifa-sidebar-item {
   display: block;
   width: 100%;
-  text-align: left;
-  background: none;
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--aifa-primary-700);
   border: none;
-  border-left: 3px solid transparent;
-  padding: 8px 16px;
-  font-size: 14px;
-  color: var(--aifa-text);
+  border-radius: var(--aifa-radius-sm);
+  text-align: left;
+  font-size: var(--aifa-font-size-body);
 }
-.aifa-sidebar-item:hover { background: var(--aifa-primary-100); }
-.aifa-sidebar-item--active {
-  border-left-color: var(--aifa-accent);
-  color: var(--aifa-accent);
-  font-weight: 600;
-  background: var(--aifa-primary-100);
+.aifa-sidebar-item:hover { background: var(--aifa-primary-50); }
+.aifa-sidebar-item--active,
+.aifa-sidebar-item--active:hover {
+  background: var(--aifa-info-bg);
+  color: var(--aifa-info);
+  font-weight: var(--aifa-font-weight-semibold);
 }
+.aifa-rail-btn {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: transparent;
+  color: var(--aifa-primary-700);
+  border: none;
+  border-radius: var(--aifa-radius-sm);
+}
+.aifa-rail-btn:hover { background: var(--aifa-primary-50); }
+.aifa-rail-btn--active,
+.aifa-rail-btn--active:hover { background: var(--aifa-info-bg); color: var(--aifa-info); }
 
-.aifa-content { flex: 1; overflow-y: auto; padding: 24px; }
+/* ----- Content area ----- */
+.aifa-content { flex: 1; min-width: 0; overflow-y: auto; padding: var(--aifa-space-5); }
+.aifa-content:focus { outline: none; }
+.aifa-content__inner { max-width: var(--aifa-content-max-width); margin: 0 auto; }
 .aifa-page { max-width: 960px; }
 .aifa-page h1 { font-size: 20px; margin-top: 0; }
 
-.aifa-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--aifa-border); margin: 16px 0; }
+@media (max-width: 767px) {
+  .aifa-content { padding: var(--aifa-space-4); }
+  .aifa-topbar { padding: 0 var(--aifa-space-2); }
+  .aifa-hide-sm { display: none; }
+}
+
+/* ----- Legacy tab strip (TabStrip.tsx) ----- */
+.aifa-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 16px 0;
+  border-bottom: 1px solid var(--aifa-border);
+  overflow-x: auto;
+}
 .aifa-tabs button {
   background: none;
   border: none;
   padding: 10px 16px;
   border-bottom: 2px solid transparent;
   color: var(--aifa-text);
+  white-space: nowrap;
 }
+.aifa-tabs button:hover { background: var(--aifa-primary-50); }
 .aifa-tabs button[aria-selected="true"] {
   border-bottom-color: var(--aifa-accent);
   color: var(--aifa-accent);
@@ -180,18 +339,19 @@ body { font-family: var(--aifa-font); font-size: var(--aifa-font-size-body); }
   padding: 1px 6px;
 }
 
+/* ----- AI Workspace slide-over ----- */
 .aifa-workspace-slideover {
   position: fixed;
   top: 0;
   right: 0;
   bottom: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
   width: min(420px, 100vw);
   background: var(--aifa-surface);
   border-left: 1px solid var(--aifa-border);
-  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.12);
-  display: flex;
-  flex-direction: column;
-  z-index: 50;
+  box-shadow: var(--aifa-shadow-lg);
 }
 .aifa-workspace-slideover-header {
   display: flex;
@@ -199,7 +359,141 @@ body { font-family: var(--aifa-font); font-size: var(--aifa-font-size-body); }
   align-items: center;
   padding: 12px 16px;
   border-bottom: 1px solid var(--aifa-border);
-  font-weight: 600;
+  font-weight: var(--aifa-font-weight-semibold);
 }
-.aifa-workspace-slideover-header button { background: none; border: none; font-size: 16px; }
 .aifa-workspace-slideover-body { flex: 1; overflow-y: auto; padding: 16px; }
+.aifa-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  color: var(--aifa-text);
+  border: none;
+  border-radius: var(--aifa-radius-sm);
+}
+.aifa-icon-btn:hover { background: var(--aifa-primary-50); }
+
+/* ----- Notice banners (read-only device, offline review) ----- */
+.aifa-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  gap: 8px 12px;
+  padding: 8px 16px;
+  font-size: var(--aifa-font-size-sm);
+  border-bottom: 1px solid var(--aifa-border);
+}
+.aifa-banner--warning { background: var(--aifa-warning-bg); color: #7C2D12; border-bottom-color: #F3D58B; }
+.aifa-banner--info { background: var(--aifa-info-bg); color: #1E3A8A; border-bottom-color: #BFDBFE; }
+.aifa-banner--stack { flex-direction: column; align-items: flex-start; gap: 4px; }
+.aifa-banner__line { margin: 0; }
+.aifa-banner__note { font-size: var(--aifa-font-size-xs); opacity: 0.85; }
+.aifa-banner__error { margin: 0; color: var(--aifa-danger); font-size: var(--aifa-font-size-xs); }
+
+/* ----- Entry screens (sign-in, workspace, setup) ----- */
+.aifa-auth {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: var(--aifa-space-5) var(--aifa-space-4);
+  background: var(--aifa-bg);
+}
+.aifa-auth__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: var(--aifa-space-5);
+  color: var(--aifa-primary-900);
+  font-size: var(--aifa-font-size-xl);
+  font-weight: var(--aifa-font-weight-bold);
+}
+.aifa-auth__panel {
+  width: min(440px, 100%);
+  padding: var(--aifa-space-5);
+  background: var(--aifa-surface);
+  border: 1px solid var(--aifa-border);
+  border-radius: var(--aifa-radius-lg);
+  box-shadow: var(--aifa-shadow-md);
+}
+.aifa-auth__title { margin: 0 0 var(--aifa-space-1); font-size: var(--aifa-font-size-xl); line-height: 1.25; }
+.aifa-auth__desc { margin: 0 0 var(--aifa-space-4); color: var(--aifa-text-muted); }
+.aifa-auth__form { display: flex; flex-direction: column; gap: var(--aifa-space-3); }
+.aifa-auth__actions { display: flex; flex-wrap: wrap; gap: var(--aifa-space-2); margin-top: var(--aifa-space-3); }
+.aifa-auth__form .aifa-auth__actions { margin-top: var(--aifa-space-1); }
+.aifa-auth__footer { margin-top: var(--aifa-space-4); color: var(--aifa-text-muted); font-size: var(--aifa-font-size-sm); text-align: center; }
+
+.aifa-alert { margin: 0; padding: 10px 12px; border-radius: var(--aifa-radius-sm); font-size: var(--aifa-font-size-sm); }
+.aifa-alert--danger { background: var(--aifa-danger-bg); color: var(--aifa-danger); }
+.aifa-alert--info { background: var(--aifa-info-bg); color: var(--aifa-info); }
+.aifa-alert--warning { background: var(--aifa-warning-bg); color: var(--aifa-warning); }
+
+.aifa-link-btn {
+  padding: 0;
+  background: none;
+  color: var(--aifa-accent);
+  border: none;
+  font: inherit;
+  text-decoration: underline;
+}
+.aifa-link-btn:hover { background: none; }
+
+.aifa-choice-list { display: flex; flex-direction: column; gap: var(--aifa-space-2); margin: 0; padding: 0; list-style: none; }
+.aifa-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--aifa-space-3);
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--aifa-surface);
+  color: var(--aifa-text);
+  border: 1px solid var(--aifa-border-strong);
+  border-radius: var(--aifa-radius-md);
+  text-align: left;
+}
+.aifa-choice:hover { background: var(--aifa-primary-50); border-color: var(--aifa-accent); }
+.aifa-choice__icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  background: var(--aifa-info-bg);
+  color: var(--aifa-info);
+  border-radius: var(--aifa-radius-sm);
+}
+.aifa-choice__name { font-weight: var(--aifa-font-weight-semibold); overflow-wrap: anywhere; }
+
+.aifa-code {
+  margin: 0 0 var(--aifa-space-2);
+  padding: var(--aifa-space-3);
+  background: var(--aifa-surface-muted);
+  border: 1px dashed var(--aifa-border-strong);
+  border-radius: var(--aifa-radius-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 15px;
+  word-break: break-all;
+  user-select: all;
+}
+
+.aifa-loading {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--aifa-space-3);
+  min-height: 60vh;
+  color: var(--aifa-text-muted);
+  text-align: center;
+}
+.aifa-loading--inline { min-height: 0; padding: var(--aifa-space-4) 0; }
+.aifa-loading__spinner { width: 24px; height: 24px; border-width: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .aifa-sidebar, .aifa-sidebar--drawer { transition: none; }
+}

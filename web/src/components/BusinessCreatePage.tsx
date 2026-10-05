@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 
 import { createSupabaseTeamMembershipTransport } from "@aifa/core/sync/teamMembershipTransport";
 
 import { supabase } from "../lib/supabaseClient";
+import { AuthLayout } from "../shell/AuthLayout";
+import { Button, Field } from "../ui";
 
 const teamMembershipTransport = createSupabaseTeamMembershipTransport(supabase);
 
@@ -33,20 +35,24 @@ interface Props {
  * way any existing business does: the new Owner invites teammates from
  * the Team section (already-live `invite_member`, Sprint 24) once signed
  * into the shell — not part of this one-time creation step.
+ *
+ * UI polish Phase 2: presentation only — same fields, same RPC call.
  */
 export function BusinessCreatePage({ onCreated }: Props): JSX.Element {
   const [legalName, setLegalName] = useState("");
   const [industry, setIndustry] = useState("");
   const [ssmRegistrationNumber, setSsmRegistrationNumber] = useState("");
   const [busy, setBusy] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(): Promise<void> {
     if (!legalName.trim()) {
-      setError("Business name is required.");
+      setNameError("Business name is required.");
       return;
     }
     setBusy(true);
+    setNameError(null);
     setError(null);
     try {
       await teamMembershipTransport.createBusiness(
@@ -62,50 +68,53 @@ export function BusinessCreatePage({ onCreated }: Props): JSX.Element {
     }
   }
 
-  return (
-    <div style={{ maxWidth: 420, margin: "48px auto", padding: 16 }}>
-      <div className="card">
-        <h1 style={{ fontSize: 18, marginTop: 0 }}>Set up your business</h1>
-        <p className="muted" style={{ marginTop: 0 }}>
-          This is a one-time step for this login — you'll be the Owner. You can invite teammates afterward from
-          the Team section.
-        </p>
+  function onSubmit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    void handleSubmit();
+  }
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-          <label>
-            Business name
+  return (
+    <AuthLayout
+      title="Set up your business"
+      description="This is a one-time step for this login — you'll be the Owner. You can invite teammates afterward from the Team section."
+    >
+      <form className="aifa-auth__form" onSubmit={onSubmit} noValidate>
+        <Field label="Business name" required error={nameError}>
+          {(p) => (
             <input
+              {...p}
+              className="ui-input"
               value={legalName}
               onChange={(e) => setLegalName(e.target.value)}
               placeholder="e.g. NHL Global Solution"
-              style={{ display: "block", width: "100%", marginTop: 4 }}
+              autoComplete="organization"
             />
-          </label>
-          <label>
-            Industry <span className="muted">(optional)</span>
+          )}
+        </Field>
+        <Field label="Industry (optional)">
+          {(p) => <input {...p} className="ui-input" value={industry} onChange={(e) => setIndustry(e.target.value)} />}
+        </Field>
+        <Field label="SSM registration number (optional)">
+          {(p) => (
             <input
-              value={industry}
-              onChange={(e) => setIndustry(e.target.value)}
-              style={{ display: "block", width: "100%", marginTop: 4 }}
-            />
-          </label>
-          <label>
-            SSM registration number <span className="muted">(optional)</span>
-            <input
+              {...p}
+              className="ui-input"
               value={ssmRegistrationNumber}
               onChange={(e) => setSsmRegistrationNumber(e.target.value)}
-              style={{ display: "block", width: "100%", marginTop: 4 }}
             />
-          </label>
-        </div>
-
-        <div className="row" style={{ marginTop: 16 }}>
-          <button onClick={() => void handleSubmit()} disabled={busy || !legalName.trim()}>
+          )}
+        </Field>
+        {error && (
+          <p className="aifa-alert aifa-alert--danger" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="aifa-auth__actions">
+          <Button type="submit" variant="primary" loading={busy} disabled={!legalName.trim()}>
             {busy ? "Creating…" : "Create business"}
-          </button>
+          </Button>
         </div>
-        {error && <p className="error">{error}</p>}
-      </div>
-    </div>
+      </form>
+    </AuthLayout>
   );
 }

@@ -8,7 +8,7 @@
  * component in the `renderContent` switch below, replacing
  * PlaceholderPage — the shell itself does not change per module sprint.
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { SqlDb } from "@aifa/core/db/types";
 import type { AiProvider } from "@aifa/core/ai/types";
@@ -17,11 +17,13 @@ import type { EffectiveAccessModel } from "@aifa/core/sync/teamMembershipTranspo
 import { DevicesPanel } from "../components/DevicesPanel";
 import { Workspace } from "../components/Workspace";
 import type { ActiveDeviceInfo } from "../lib/syncService";
+import { Icon } from "../ui";
 
 import { AccessProvider } from "./AccessContext";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { PlaceholderPage } from "./PlaceholderPage";
+import { useMediaQuery } from "./useMediaQuery";
 import { CaptureRouterPage } from "./pages/CaptureRouterPage";
 import { ForwardToAifaPage } from "./pages/ForwardToAifaPage";
 import { MembersPage } from "./pages/MembersPage";
@@ -60,6 +62,10 @@ interface Props {
   provider: AiProvider;
   accessModel: EffectiveAccessModel;
   activeDeviceInfo: ActiveDeviceInfo | null;
+  /** Business legal name shown in the top bar; falls back to "AiFA" when unknown. */
+  businessName?: string | null;
+  /** Signed-in email shown in the account menu. */
+  userEmail?: string | null;
 }
 
 export function AppShell({
@@ -71,10 +77,52 @@ export function AppShell({
   provider,
   accessModel,
   activeDeviceInfo,
+  businessName,
+  userEmail,
 }: Props): JSX.Element {
   const [collapsed, setCollapsed] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeItemId, setActiveItemId] = useState(DEFAULT_SIDEBAR_ITEM_ID);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const mainRef = useRef<HTMLElement>(null);
+  // Below 768px the sidebar becomes a slide-over drawer instead of a
+  // fixed column (UI polish Phase 2).
+  const isMobile = useMediaQuery("(max-width: 767px)");
+
+  const businessLabel = businessName?.trim() || "AiFA";
+
+  useEffect(() => {
+    document.title = businessLabel === "AiFA" ? "AiFA" : `${businessLabel} · AiFA`;
+  }, [businessLabel]);
+
+  // Leaving mobile width closes the drawer so it cannot linger open.
+  useEffect(() => {
+    if (!isMobile) setDrawerOpen(false);
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setDrawerOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [drawerOpen]);
+
+  // A new page starts at the top of the content area.
+  useEffect(() => {
+    mainRef.current?.scrollTo?.(0, 0);
+  }, [activeItemId]);
+
+  function handleSelect(itemId: string): void {
+    setActiveItemId(itemId);
+    setDrawerOpen(false);
+  }
+
+  function handleToggleNav(): void {
+    if (isMobile) setDrawerOpen((open) => !open);
+    else setCollapsed((c) => !c);
+  }
 
   const activeItem = SIDEBAR_ITEMS_BY_ID[activeItemId];
 
@@ -153,15 +201,31 @@ export function AppShell({
   return (
     <AccessProvider accessModel={accessModel} businessId={businessId} userId={userId}>
       <div className="aifa-shell">
+        <a className="aifa-skip-link" href="#aifa-main">
+          Skip to main content
+        </a>
         <TopBar
-          onToggleSidebar={() => setCollapsed((c) => !c)}
-          businessLabel="AiFA"
+          onToggleSidebar={handleToggleNav}
+          navExpanded={isMobile ? drawerOpen : !collapsed}
+          businessLabel={businessLabel}
+          userEmail={userEmail}
           activeDeviceInfo={activeDeviceInfo}
           onOpenWorkspace={() => setWorkspaceOpen(true)}
         />
         <div className="aifa-shell-body">
-          <Sidebar collapsed={collapsed} activeItemId={activeItemId} onSelect={setActiveItemId} />
-          <main className="aifa-content">{renderContent()}</main>
+          <Sidebar
+            collapsed={collapsed}
+            activeItemId={activeItemId}
+            onSelect={handleSelect}
+            drawer={isMobile}
+            drawerOpen={drawerOpen}
+          />
+          {isMobile && drawerOpen && (
+            <div className="aifa-backdrop" aria-hidden="true" onClick={() => setDrawerOpen(false)} />
+          )}
+          <main className="aifa-content" id="aifa-main" ref={mainRef} tabIndex={-1}>
+            <div className="aifa-content__inner">{renderContent()}</div>
+          </main>
         </div>
         {workspaceOpen && (
           <div
@@ -174,8 +238,14 @@ export function AppShell({
           >
             <div className="aifa-workspace-slideover-header">
               <span>AI Workspace</span>
-              <button aria-label="Close AI Workspace" onClick={() => setWorkspaceOpen(false)}>
-                ✕
+              <button
+                type="button"
+                className="aifa-icon-btn"
+                aria-label="Close AI Workspace"
+                autoFocus
+                onClick={() => setWorkspaceOpen(false)}
+              >
+                <Icon name="x" size={18} />
               </button>
             </div>
             <div className="aifa-workspace-slideover-body">

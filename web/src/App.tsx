@@ -30,6 +30,7 @@ import {
 import { getLastSelectedWorkspace, setLastSelectedWorkspace } from "./lib/workspaceSelection";
 import { supabase } from "./lib/supabaseClient";
 import { AppShell } from "./shell/AppShell";
+import { LoadingScreen } from "./shell/LoadingScreen";
 
 const teamMembershipTransport = createSupabaseTeamMembershipTransport(supabase);
 
@@ -219,7 +220,7 @@ export default function App(): JSX.Element {
   }
 
   if (sessionLoading) {
-    return <p className="muted" style={{ padding: 24 }}>Loading…</p>;
+    return <LoadingScreen />;
   }
 
   if (!session && !devBypassBusinessId) {
@@ -234,7 +235,7 @@ export default function App(): JSX.Element {
 
   // Sprint 63 Workspace Resolution -- signed in (or dev bypass) from here.
   if (!devBypassBusinessId && myBusinesses === null) {
-    return <p className="muted" style={{ padding: 24 }}>Loading…</p>;
+    return <LoadingScreen />;
   }
 
   if (!devBypassBusinessId && myBusinesses!.length === 0) {
@@ -246,7 +247,7 @@ export default function App(): JSX.Element {
   }
 
   if (!businessId || !identityChecked) {
-    return <p className="muted" style={{ padding: 24 }}>Loading…</p>;
+    return <LoadingScreen />;
   }
 
   if (dataClearedError) {
@@ -268,13 +269,14 @@ export default function App(): JSX.Element {
   }
 
   if (!db) {
-    return <p className="muted" style={{ padding: 24 }}>Opening your local data…</p>;
+    return <LoadingScreen message="Opening your local data…" />;
   }
 
   const provider = getDefaultWebProvider();
+  const businessName = myBusinesses?.find((b) => b.businessId === businessId)?.legalName ?? null;
 
   return (
-    <>
+    <div className="aifa-app-root">
       {identity && activeDeviceInfo && (
         <ReadOnlyBanner
           db={db}
@@ -301,7 +303,9 @@ export default function App(): JSX.Element {
         provider={provider}
         accessModel={accessModel}
         activeDeviceInfo={activeDeviceInfo}
+        businessName={businessName}
+        userEmail={session?.user.email ?? null}
       />
-    </>
+    </div>
   );
 }

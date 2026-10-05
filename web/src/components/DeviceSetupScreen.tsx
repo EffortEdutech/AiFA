@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import {
   bootstrapWebSyncIdentity,
@@ -7,6 +7,8 @@ import {
   type WebSyncIdentity,
 } from "../lib/deviceBootstrap";
 import { getAllDevices } from "../lib/syncService";
+import { AuthLayout } from "../shell/AuthLayout";
+import { Button, Field } from "../ui";
 
 interface Props {
   businessId: string;
@@ -37,6 +39,11 @@ interface Props {
  * existing device (even a revoked one) means a code already exists
  * elsewhere, so the original enter-the-existing-code form stays exactly
  * as it was for that case.
+ *
+ * UI polish Phase 2: presentation only -- the three states (checking,
+ * first device, existing code) and the one-time code reveal keep their
+ * logic and wording; they now share the AuthLayout frame and ui kit
+ * fields/buttons.
  */
 export function DeviceSetupScreen({ businessId, onReady }: Props): JSX.Element {
   const [deviceLabel, setDeviceLabel] = useState("");
@@ -150,12 +157,26 @@ export function DeviceSetupScreen({ businessId, onReady }: Props): JSX.Element {
     }
   }
 
+  const devBypassButton = import.meta.env.DEV ? (
+    <Button variant="ghost" onClick={() => void handleDevBypass()} disabled={busy}>
+      Skip (dev only, no backend)
+    </Button>
+  ) : null;
+
+  const errorAlert = error ? (
+    <p className="aifa-alert aifa-alert--danger" role="alert">
+      {error}
+    </p>
+  ) : null;
+
   if (isFirstDevice === null) {
     return (
-      <div className="card" style={{ maxWidth: 420, margin: "60px auto" }}>
-        <h1 style={{ fontSize: 20 }}>Set up this browser</h1>
-        <p className="muted">Checking this business's devices…</p>
-      </div>
+      <AuthLayout title="Set up this browser">
+        <div className="aifa-loading aifa-loading--inline" role="status">
+          <span className="ui-spinner" aria-hidden="true" />
+          <span>Checking this business's devices…</span>
+        </div>
+      </AuthLayout>
     );
   }
 
@@ -165,126 +186,101 @@ export function DeviceSetupScreen({ businessId, onReady }: Props): JSX.Element {
   // only chance to copy it down.
   if (generatedCode) {
     return (
-      <div className="card" style={{ maxWidth: 420, margin: "60px auto" }}>
-        <h1 style={{ fontSize: 20 }}>Save your recovery code</h1>
-        <p className="muted">
-          This is the only time this code is shown. You'll need it to set up
-          the mobile app or another browser for this business later — write
-          it down or copy it somewhere safe now.
-        </p>
-        <p
-          style={{
-            fontFamily: "monospace",
-            fontSize: 14,
-            wordBreak: "break-all",
-            background: "rgba(127,127,127,0.15)",
-            padding: 12,
-            borderRadius: 6,
-            userSelect: "all",
-            marginTop: 12,
-          }}
-        >
-          {generatedCode}
-        </p>
-        <button onClick={() => void handleCopyCode()} style={{ marginTop: 8 }}>
-          {copied ? "Copied" : "Copy code"}
-        </button>
-        <button onClick={handleConfirmSavedCode} style={{ marginTop: 16, marginLeft: 8 }}>
-          I've saved it — Continue
-        </button>
-      </div>
+      <AuthLayout
+        title="Save your recovery code"
+        description="This is the only time this code is shown. You'll need it to set up the mobile app or another browser for this business later — write it down or copy it somewhere safe now."
+      >
+        <p className="aifa-code">{generatedCode}</p>
+        <div className="aifa-auth__actions">
+          <Button variant="secondary" icon={copied ? "check" : undefined} onClick={() => void handleCopyCode()}>
+            {copied ? "Copied" : "Copy code"}
+          </Button>
+          <Button variant="primary" onClick={handleConfirmSavedCode}>
+            I've saved it — Continue
+          </Button>
+        </div>
+      </AuthLayout>
     );
   }
 
+  function onSubmitFirstDevice(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (!busy) void handleGenerateFirstDeviceCode();
+  }
+
+  function onSubmitExistingCode(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (!busy && recoveryCode.trim()) void handleSubmit();
+  }
+
+  const deviceNameField = (
+    <Field label="Name this device">
+      {(p) => (
+        <input
+          {...p}
+          className="ui-input"
+          value={deviceLabel}
+          onChange={(e) => setDeviceLabel(e.target.value)}
+          placeholder="e.g. Office laptop — Chrome"
+        />
+      )}
+    </Field>
+  );
+
   if (isFirstDevice) {
     return (
-      <div className="card" style={{ maxWidth: 420, margin: "60px auto" }}>
-        <h1 style={{ fontSize: 20 }}>Set up this browser</h1>
-        <p className="muted">
-          No device has been set up for this business yet, so this browser
-          will create the encrypted local storage and its recovery code —
-          you'll be shown that code once, right after, to save for later
-          (mobile app or another browser).
-        </p>
-        <label style={{ display: "block", marginTop: 12 }}>
-          Name this device
-          <input
-            value={deviceLabel}
-            onChange={(e) => setDeviceLabel(e.target.value)}
-            placeholder="e.g. Office laptop — Chrome"
-            style={{ width: "100%", padding: 8, marginTop: 4 }}
-          />
-        </label>
-        <button
-          onClick={() => void handleGenerateFirstDeviceCode()}
-          disabled={busy}
-          style={{ marginTop: 16 }}
-        >
-          {busy ? "Setting up…" : "Continue"}
-        </button>
-        {import.meta.env.DEV && (
-          <button
-            onClick={() => void handleDevBypass()}
-            disabled={busy}
-            style={{ marginTop: 8, opacity: 0.7 }}
-          >
-            Skip (dev only, no backend)
-          </button>
-        )}
-        {error && <p className="error">{error}</p>}
-      </div>
+      <AuthLayout
+        title="Set up this browser"
+        description="No device has been set up for this business yet, so this browser will create the encrypted local storage and its recovery code — you'll be shown that code once, right after, to save for later (mobile app or another browser)."
+      >
+        <form className="aifa-auth__form" onSubmit={onSubmitFirstDevice}>
+          {deviceNameField}
+          {errorAlert}
+          <div className="aifa-auth__actions">
+            <Button type="submit" variant="primary" loading={busy}>
+              {busy ? "Setting up…" : "Continue"}
+            </Button>
+            {devBypassButton}
+          </div>
+        </form>
+      </AuthLayout>
     );
   }
 
   return (
-    <div className="card" style={{ maxWidth: 420, margin: "60px auto" }}>
-      <h1 style={{ fontSize: 20 }}>Set up this browser</h1>
-      <p className="muted">
-        Enter the recovery code from your AiFA mobile app (Settings → reveal
-        recovery code) to unlock encrypted local storage on this browser.
-        This is the same code, not a new one.
-      </p>
+    <AuthLayout
+      title="Set up this browser"
+      description="Enter the recovery code from your AiFA mobile app (Settings → reveal recovery code) to unlock encrypted local storage on this browser. This is the same code, not a new one."
+    >
       {checkError && (
-        <p className="muted" style={{ fontSize: 12 }}>
-          (Couldn't confirm whether this is the first device for this
-          business, so a recovery code is required to be safe: {checkError})
+        <p className="aifa-alert aifa-alert--info">
+          Couldn't confirm whether this is the first device for this business, so a recovery code is required to be
+          safe: {checkError}
         </p>
       )}
-      <label style={{ display: "block", marginTop: 12 }}>
-        Name this device
-        <input
-          value={deviceLabel}
-          onChange={(e) => setDeviceLabel(e.target.value)}
-          placeholder="e.g. Office laptop — Chrome"
-          style={{ width: "100%", padding: 8, marginTop: 4 }}
-        />
-      </label>
-      <label style={{ display: "block", marginTop: 12 }}>
-        Recovery code
-        <input
-          value={recoveryCode}
-          onChange={(e) => setRecoveryCode(e.target.value)}
-          placeholder="from the mobile app"
-          style={{ width: "100%", padding: 8, marginTop: 4 }}
-        />
-      </label>
-      <button
-        onClick={() => void handleSubmit()}
-        disabled={busy || !recoveryCode.trim()}
-        style={{ marginTop: 16 }}
-      >
-        {busy ? "Setting up…" : "Continue"}
-      </button>
-      {import.meta.env.DEV && (
-        <button
-          onClick={() => void handleDevBypass()}
-          disabled={busy}
-          style={{ marginTop: 8, opacity: 0.7 }}
-        >
-          Skip (dev only, no backend)
-        </button>
-      )}
-      {error && <p className="error">{error}</p>}
-    </div>
+      <form className="aifa-auth__form" onSubmit={onSubmitExistingCode}>
+        {deviceNameField}
+        <Field label="Recovery code">
+          {(p) => (
+            <input
+              {...p}
+              className="ui-input"
+              value={recoveryCode}
+              onChange={(e) => setRecoveryCode(e.target.value)}
+              placeholder="from the mobile app"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          )}
+        </Field>
+        {errorAlert}
+        <div className="aifa-auth__actions">
+          <Button type="submit" variant="primary" loading={busy} disabled={!recoveryCode.trim()}>
+            {busy ? "Setting up…" : "Continue"}
+          </Button>
+          {devBypassButton}
+        </div>
+      </form>
+    </AuthLayout>
   );
 }

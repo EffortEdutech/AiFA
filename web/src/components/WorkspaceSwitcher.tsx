@@ -9,8 +9,13 @@
  * flow, reachable once inside a Workspace via Business Settings in a
  * later sprint if the owner wants a "+ New business" entry point; not
  * part of Sprint 63's DoD).
+ *
+ * UI polish Phase 2: presentation only — same props, same callbacks.
  */
 import type { MyBusinessSummary } from "@aifa/core/sync/teamMembershipTransport";
+
+import { Icon } from "../ui";
+import { AuthLayout } from "../shell/AuthLayout";
 
 interface Props {
   businesses: MyBusinessSummary[];
@@ -19,24 +24,22 @@ interface Props {
 
 export function WorkspaceSwitcher({ businesses, onSelect }: Props): JSX.Element {
   return (
-    <div style={{ maxWidth: 420, margin: "48px auto", padding: 16 }}>
-      <div className="card">
-        <h1 style={{ fontSize: 18, marginTop: 0 }}>Choose a workspace</h1>
-        <p className="muted" style={{ marginTop: 0 }}>
-          You belong to more than one Client Business. Pick which one to open.
-        </p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-          {businesses.map((b) => (
-            <button
-              key={b.businessId}
-              onClick={() => onSelect(b.businessId)}
-              style={{ textAlign: "left", padding: "10px 12px" }}
-            >
-              {b.legalName ?? `Business #${b.businessId.slice(0, 8)}`}
+    <AuthLayout
+      title="Choose a workspace"
+      description="You belong to more than one Client Business. Pick which one to open."
+    >
+      <ul className="aifa-choice-list">
+        {businesses.map((b) => (
+          <li key={b.businessId}>
+            <button type="button" className="aifa-choice" onClick={() => onSelect(b.businessId)}>
+              <span className="aifa-choice__icon" aria-hidden="true">
+                <Icon name="briefcase" size={18} />
+              </span>
+              <span className="aifa-choice__name">{b.legalName ?? `Business #${b.businessId.slice(0, 8)}`}</span>
             </button>
-          ))}
-        </div>
-      </div>
-    </div>
+          </li>
+        ))}
+      </ul>
+    </AuthLayout>
   );
 }
