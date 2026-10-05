@@ -197,11 +197,12 @@ Confirmed fixed two ways: a direct `set local role service_role;` query against 
 
 **One real bug found in that same confirmation, fixed same-session:** the business name showed as the placeholder "This business" instead of "Verify Test Co" in the nav bar. Root cause: `web-public/app/site/[slug]/page.tsx` reads `businesses.legal_name` using the anon key (correctly — it's a public app, no service_role key belongs there), but `businesses` only has "Members can view their own business" RLS; an anonymous visitor has no membership, so that read silently returned zero rows. `supabase/functions/public-homepage` never hit this because it uses a service_role client that bypasses RLS. Fixed with migration `00000000000020_sprint70_public_business_name_rpc.sql` — a narrow, anon-callable `get_public_business_name(uuid) returns text` RPC (same `SECURITY DEFINER` pattern as `resolve_business_slug()`), scoped to just `legal_name`, not a general RLS opening on `businesses`. Rebuilt clean locally before committing; **not yet re-confirmed live by the owner after this specific fix** — flagging as the one open item.
 
-**Remaining owner action:**
-- [ ] Push the latest commit (includes the `get_public_business_name()` fix) and redeploy, then reload `https://ai-fa-tawny.vercel.app/site/verify-test-co` once more to confirm the nav bar now shows "Verify Test Co" instead of "This business".
-- [ ] Test the contact form end-to-end (submits via `/api/site/contact` -> `submit_public_request()` -> should appear as a `requests` row / Approval Task per Sprint 68's existing wiring) — not yet exercised live.
-- [ ] Decide whether/when to retire `supabase/functions/public-homepage` now that `web-public/` supersedes it as the browser-facing renderer.
-- [ ] When ready, attach the `aifa.com` custom domain to this Vercel project (Project Settings -> Domains) so `/site/<slug>` resolves there instead of only `ai-fa-tawny.vercel.app`.
+**Status update (22 September 2026): fully closed out.** All three remaining items confirmed by the owner in one pass:
+- [x] `get_public_business_name()` fix confirmed live — `/site/verify-test-co` now correctly shows "Verify Test Co" in the nav (owner's own pasted output).
+- [x] Contact form tested end-to-end — submit produced "Thanks — we'll be in touch." (the success state `ContactForm.tsx` shows once `/api/site/contact` -> `submit_public_request()` returns `ok: true`). Not independently re-verified as a `requests` row this session, but the client-observed success path matches the wiring exactly.
+- [x] `supabase/functions/public-homepage` retired (owner: "Can retire now") — redeployed as v5, a 410 stub pointing to `web-public/`, rather than deleted (no delete tool available to this session for Edge Functions). Its code, and the RLS check performed alongside this (confirmed `public_site_content` has no equivalent gap — only `businesses` did), are recorded above for history.
+
+**Still open, no action needed yet:** attaching the `aifa.com` custom domain to the `ai-fa` Vercel project (Project Settings -> Domains) — deferred until the domain is actually registered/owned. Clarified for the owner: `aifa.com` refers to the domain name itself, not either codebase — it would attach to *this* Vercel project (`web-public`), while `web/` (the internal Owner/Staff app, still only at `localhost:3070`) would eventually get its own subdomain (e.g. `app.aifa.com`) as a separate, later deploy.
 
 ## Phase 5 relationship
 

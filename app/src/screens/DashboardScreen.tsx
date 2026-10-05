@@ -21,6 +21,7 @@ import {
 } from "react-native";
 
 import { ActivityFeed } from "@/components/ActivityFeed";
+import { MoneyMovesCard } from "@/components/MoneyMovesCard";
 import { WhyButton } from "@/components/WhyButton";
 import { getDb, getLocalBusinessId } from "@/db/client";
 import { useRecentActivity } from "@/hooks/useRecentActivity";
@@ -56,6 +57,14 @@ import { useRecentActivity } from "@/hooks/useRecentActivity";
  * notifications (no expo-notifications dependency added -- AGENTS.md: no
  * new production dependencies without approval): the owner sees it the
  * next time they open the app rather than being proactively pinged.
+ *
+ * 5 October 2026 ("Money Moves", docs/ideas/AiFA_Improvement_Proposal_
+ * Money_Moves.md): a Money Moves card sits at the very top — the same
+ * ranked "what to do next" list as the web Business Overview → Today
+ * tab, from the shared @aifa/core loader, with a WhatsApp "Draft
+ * reminder" for overdue invoices. It reads the cloud books, so it only
+ * fills in once the owner is signed in; signed out it shows a one-line
+ * hint and nothing else on this screen depends on it.
  */
 export default function DashboardScreen() {
   const {
@@ -72,6 +81,7 @@ export default function DashboardScreen() {
   const [receivables, setReceivables] = useState<OutstandingItem[]>([]);
   const [payables, setPayables] = useState<OutstandingItem[]>([]);
   const [notifications, setNotifications] = useState<AiFaNotification[]>([]);
+  const [moneyMovesKey, setMoneyMovesKey] = useState(0);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -112,6 +122,7 @@ export default function DashboardScreen() {
   }, [loadSummary]);
 
   async function handleRefresh() {
+    setMoneyMovesKey((k) => k + 1);
     await Promise.all([pullToRefresh(), loadSummary()]);
   }
 
@@ -123,6 +134,8 @@ export default function DashboardScreen() {
       }
     >
       <Text style={styles.heading}>Dashboard</Text>
+
+      <MoneyMovesCard refreshKey={moneyMovesKey} />
 
       {(activityError || summaryError) && (
         <Text style={styles.error}>{activityError || summaryError}</Text>

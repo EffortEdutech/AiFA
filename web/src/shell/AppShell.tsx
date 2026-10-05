@@ -84,7 +84,13 @@ export function AppShell({
     // other item is its own future sprint's placeholder.
     switch (activeItemId) {
       case "business-overview":
-        return <BusinessOverviewPage businessId={businessId} onGoToApprovals={() => setActiveItemId("approvals")} />;
+        return (
+          <BusinessOverviewPage
+            businessId={businessId}
+            onGoToApprovals={() => setActiveItemId("approvals")}
+            onNavigate={setActiveItemId}
+          />
+        );
       case "quick-capture":
         return <CaptureRouterPage businessId={businessId} onGoToApprovals={() => setActiveItemId("approvals")} />;
       case "forward-to-aifa":

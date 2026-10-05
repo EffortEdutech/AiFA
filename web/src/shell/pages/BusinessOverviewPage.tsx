@@ -26,6 +26,15 @@
  * IA decision, not a silently dropped feature. `CaptureForm.tsx` itself
  * is left in the tree, simply no longer wired here.
  *
+ * AMENDMENT (1 October 2026, owner decision — "Money Moves" proposal,
+ * docs/ideas/AiFA_Improvement_Proposal_Money_Moves.md): the fixed tab set
+ * above gains exactly ONE tab, "Today", placed first and opened by
+ * default. It is still a single focused view (a ranked list of at most
+ * five next actions from `@aifa/core/ai/cfoActionFeed`, rendered by
+ * `TodayMoneyMovesTab.tsx`), not an open-ended widget grid — the "tabs,
+ * not noticeboards" rule itself is unchanged. Vol 12_2 §5.1 is amended
+ * to match.
+ *
  * AP TOTAL — DISCLOSED REAL ZERO: `Accounts Payable` (account_code
  * '2000') is seeded in every business's Chart of Accounts but no RPC in
  * this schema ever posts to it — Payment Vouchers post cash-basis
@@ -53,16 +62,19 @@ import { listApprovalTasks } from "../../lib/approvals";
 import { listEInvoiceSubmissions } from "../../lib/einvoiceSst";
 import { listMemberships, listRoles, type RoleSummary } from "../../lib/membership";
 import { TabStrip } from "../TabStrip";
+import { TodayMoneyMovesTab } from "./TodayMoneyMovesTab";
 
 const fullAccountingReportsTransport = createSupabaseFullAccountingReportsTransport(supabase);
 const paymentsCreditNotesTransport = createSupabasePaymentsCreditNotesTransport(supabase);
 const legalCommercialTransport = createSupabaseLegalCommercialTransport(supabase);
 
-type OverviewTab = "snapshot" | "sales-pipeline" | "compliance-status" | "team-activity";
+type OverviewTab = "today" | "snapshot" | "sales-pipeline" | "compliance-status" | "team-activity";
 
 interface Props {
   businessId: string;
   onGoToApprovals?: () => void;
+  /** Jump to any sidebar item — used by the Today tab's action buttons. */
+  onNavigate?: (sidebarItemId: string) => void;
 }
 
 function todayIso(): string {
@@ -76,8 +88,8 @@ function fmt(n: number): string {
 const QUOTATION_STATUSES: QuotationStatus[] = ["draft", "sent", "accepted", "rejected", "expired", "converted_to_invoice"];
 const EINVOICE_STATUSES: EInvoiceSubmissionStatus[] = ["draft", "submitted", "validated", "rejected", "cancelled"];
 
-export function BusinessOverviewPage({ businessId, onGoToApprovals }: Props): JSX.Element {
-  const [tab, setTab] = useState<OverviewTab>("snapshot");
+export function BusinessOverviewPage({ businessId, onGoToApprovals, onNavigate }: Props): JSX.Element {
+  const [tab, setTab] = useState<OverviewTab>("today");
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Snapshot
@@ -138,6 +150,8 @@ export function BusinessOverviewPage({ businessId, onGoToApprovals }: Props): JS
 
   useEffect(() => {
     setLoadError(null);
+    // The Today tab loads its own data (TodayMoneyMovesTab.tsx).
+    if (tab === "today") return;
     const load =
       tab === "snapshot"
         ? loadSnapshot
@@ -162,6 +176,7 @@ export function BusinessOverviewPage({ businessId, onGoToApprovals }: Props): JS
       <h1>Business Overview</h1>
       <TabStrip
         tabs={[
+          { id: "today", label: "Today" },
           { id: "snapshot", label: "Snapshot" },
           { id: "sales-pipeline", label: "Sales Pipeline" },
           { id: "compliance-status", label: "Compliance Status" },
@@ -172,6 +187,8 @@ export function BusinessOverviewPage({ businessId, onGoToApprovals }: Props): JS
       />
 
       {loadError && <p className="error">{loadError}</p>}
+
+      {tab === "today" && <TodayMoneyMovesTab businessId={businessId} onNavigate={onNavigate} />}
 
       {tab === "snapshot" && (
         <div className="card">

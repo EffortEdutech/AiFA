@@ -1,0 +1,260 @@
+/**
+ * Business Overview → "Today" tab ("Money Moves") — 1 October 2026,
+ * docs/ideas/AiFA_Improvement_Proposal_Money_Moves.md.
+ *
+ * Web (Path B) surface for the AI CFO Assistant Engine: a short, ranked
+ * list of what the owner should do next, each with a plain-language
+ * "why" and a button that jumps to the page that fixes it. Ranking lives
+ * in `@aifa/core/ai/cfoActionFeed`; loading (shared with the mobile
+ * Dashboard card) lives in `@aifa/core/ai/cfoActionFeedLoader`. This
+ * component only wires web's read helpers in and renders the result.
+ *
+ * READS ONLY — no writes, no new RPC, no schema change.
+ *
+ * PARTIAL-DATA HONESTY: a source that fails to load (e.g. no permission
+ * for this role) does not blank the list; it is named under the list,
+ * so "nothing to do" is never claimed on missing data.
+ *
+ * DRAFT REMINDER (5 October 2026, slice 3): overdue-invoice moves get a
+ * "Draft reminder" button that opens an editable WhatsApp message
+ * (English or Bahasa Melayu, tone set by how late the invoice is — see
+ * `@aifa/core/ai/paymentReminder`). "Open WhatsApp" opens a `wa.me`
+ * click-to-chat link; the owner still taps Send inside WhatsApp —
+ * AiFA never sends anything itself (same rule as the Quotation send
+ * flow, owner's Sprint 21 choice).
+ */
+import { useCallback, useEffect, useState } from "react";
+
+import type { CfoAction, OverdueInvoiceRef } from "@aifa/core/ai/cfoActionFeed";
+import { loadCfoActionFeed, type LoadedCfoActionFeed } from "@aifa/core/ai/cfoActionFeedLoader";
+import {
+  buildWhatsAppLink,
+  draftPaymentReminder,
+  normaliseMyPhoneE164,
+  type ReminderLanguage,
+} from "@aifa/core/ai/paymentReminder";
+import { createSupabaseFullAccountingReportsTransport } from "@aifa/core/sync/fullAccountingReportsTransport";
+import { createSupabaseLegalCommercialTransport } from "@aifa/core/sync/legalCommercialTransport";
+import { createSupabasePaymentsCreditNotesTransport } from "@aifa/core/sync/paymentsCreditNotesTransport";
+
+import { listApprovalTasks } from "../../lib/approvals";
+import { listCaptureTriage } from "../../lib/captureTriage";
+import { listParties } from "../../lib/partiesAndAccounts";
+import { listPaymentVouchers } from "../../lib/purchasesAndCash";
+import { supabase } from "../../lib/supabaseClient";
+import { SIDEBAR_ITEMS_BY_ID } from "../sidebarConfig";
+
+const fullAccountingReportsTransport = createSupabaseFullAccountingReportsTransport(supabase);
+const paymentsCreditNotesTransport = createSupabasePaymentsCreditNotesTransport(supabase);
+const legalCommercialTransport = createSupabaseLegalCommercialTransport(supabase);
+
+interface Props {
+  businessId: string;
+  /** Jump to a sidebar item (AppShell's setActiveItemId). Optional — without it, actions render without a button. */
+  onNavigate?: (sidebarItemId: string) => void;
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function loadForBusiness(businessId: string): Promise<LoadedCfoActionFeed> {
+  return loadCfoActionFeed({
+    cashBalance: async () => {
+      const tb = await fullAccountingReportsTransport.trialBalance({ businessId, asOfDate: todayIso() });
+      return tb.find((e) => e.accountCode === "1000")?.balance ?? null;
+    },
+    arAgeing: () => paymentsCreditNotesTransport.arAgeingDetail(businessId),
+    paymentVouchers: () => listPaymentVouchers(businessId),
+    approvalTasks: () => listApprovalTasks(businessId),
+    dueContractAlerts: () => legalCommercialTransport.listDueContractAlerts(businessId),
+    captureTriage: () => listCaptureTriage(businessId),
+    parties: async () =>
+      (await listParties(businessId)).map((p) => ({
+        id: p.id,
+        displayName: p.displayName,
+        contactPhone: p.contactPhone,
+      })),
+  });
+}
+
+export function TodayMoneyMovesTab({ businessId, onNavigate }: Props): JSX.Element {
+  const [loaded, setLoaded] = useState<LoadedCfoActionFeed | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [openReminderId, setOpenReminderId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoaded(await loadForBusiness(businessId));
+    setLoading(false);
+  }, [businessId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (loaded === null) {
+    return <p className="muted">Working out today&apos;s money moves…</p>;
+  }
+
+  const { feed, failedSources, partyPhones } = loaded;
+
+  return (
+    <div className="card">
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+        <strong>Money Moves — what to do next</strong>
+        <button onClick={() => void load()} disabled={loading} style={{ padding: "0 6px" }}>
+          {loading ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+
+      {feed.actions.length === 0 ? (
+        <p className="muted" style={{ margin: "8px 0" }}>
+          {failedSources.length === 0
+            ? "Nothing needs your attention right now."
+            : "Nothing found in the data that loaded — see below for what could not be checked."}
+        </p>
+      ) : (
+        <ol style={{ margin: "8px 0", paddingLeft: 20 }}>
+          {feed.actions.map((a) => (
+            <MoneyMoveItem
+              key={a.id}
+              action={a}
+              onNavigate={onNavigate}
+              reminderOpen={openReminderId === a.id}
+              onToggleReminder={() => setOpenReminderId((cur) => (cur === a.id ? null : a.id))}
+              partyPhone={a.invoice ? (partyPhones[a.invoice.partyId] ?? null) : null}
+            />
+          ))}
+        </ol>
+      )}
+
+      {feed.totalCandidates > feed.actions.length && (
+        <p className="muted" style={{ fontSize: 12, margin: "4px 0" }}>
+          Showing the top {feed.actions.length} of {feed.totalCandidates}.
+        </p>
+      )}
+      {failedSources.length > 0 && (
+        <p className="muted" style={{ fontSize: 12, margin: "4px 0" }}>
+          Could not check: {failedSources.join(", ")} (no access for your role, or the read failed).
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MoneyMoveItem({
+  action,
+  onNavigate,
+  reminderOpen,
+  onToggleReminder,
+  partyPhone,
+}: {
+  action: CfoAction;
+  onNavigate?: (sidebarItemId: string) => void;
+  reminderOpen: boolean;
+  onToggleReminder: () => void;
+  partyPhone: string | null;
+}): JSX.Element {
+  const target = SIDEBAR_ITEMS_BY_ID[action.targetPage];
+  return (
+    <li style={{ marginBottom: 10 }}>
+      <div style={{ fontWeight: 600 }}>{action.title}</div>
+      <div className="muted" style={{ fontSize: 13 }}>
+        Why: {action.why}
+      </div>
+      <div className="row" style={{ gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+        {action.invoice && (
+          <button onClick={onToggleReminder} aria-expanded={reminderOpen} style={{ padding: "0 6px" }}>
+            {reminderOpen ? "Close reminder" : "Draft reminder"}
+          </button>
+        )}
+        {onNavigate && target && (
+          <button onClick={() => onNavigate(action.targetPage)} style={{ padding: "0 6px" }}>
+            Go to {target.label}
+          </button>
+        )}
+      </div>
+      {reminderOpen && action.invoice && <ReminderPanel invoice={action.invoice} partyPhone={partyPhone} />}
+    </li>
+  );
+}
+
+function ReminderPanel({ invoice, partyPhone }: { invoice: OverdueInvoiceRef; partyPhone: string | null }): JSX.Element {
+  const [language, setLanguage] = useState<ReminderLanguage>("en");
+  const [text, setText] = useState(() => draftReminderFor(invoice, "en"));
+  const [copied, setCopied] = useState(false);
+  const phone = normaliseMyPhoneE164(partyPhone);
+
+  function switchLanguage(next: ReminderLanguage): void {
+    setLanguage(next);
+    setText(draftReminderFor(invoice, next));
+    setCopied(false);
+  }
+
+  async function copy(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 6, padding: 8, border: "1px solid var(--aifa-border, #ddd)", borderRadius: 6 }}>
+      <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <span className="muted" style={{ fontSize: 12 }}>
+          Language:
+        </span>
+        <button onClick={() => switchLanguage("en")} aria-pressed={language === "en"} style={{ padding: "0 6px" }}>
+          English
+        </button>
+        <button onClick={() => switchLanguage("ms")} aria-pressed={language === "ms"} style={{ padding: "0 6px" }}>
+          Bahasa Melayu
+        </button>
+      </div>
+      <label className="muted" style={{ display: "block", fontSize: 12, marginTop: 6 }}>
+        Message (edit before sending)
+        <textarea
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            setCopied(false);
+          }}
+          rows={7}
+          style={{ display: "block", width: "100%", marginTop: 4 }}
+        />
+      </label>
+      <div className="row" style={{ gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+        <button
+          onClick={() => window.open(buildWhatsAppLink(phone, text), "_blank", "noopener,noreferrer")}
+          style={{ padding: "0 6px" }}
+        >
+          Open WhatsApp
+        </button>
+        <button onClick={() => void copy()} style={{ padding: "0 6px" }}>
+          {copied ? "Copied" : "Copy text"}
+        </button>
+      </div>
+      <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
+        {phone
+          ? `Opens a chat with ${invoice.partyName ?? "this customer"} (+${phone}). Nothing is sent until you tap Send in WhatsApp.`
+          : "No valid phone number on file for this customer — WhatsApp will ask you to pick the contact. Nothing is sent until you tap Send."}
+      </p>
+    </div>
+  );
+}
+
+function draftReminderFor(invoice: OverdueInvoiceRef, language: ReminderLanguage): string {
+  return draftPaymentReminder(
+    {
+      customerName: invoice.partyName,
+      invoiceNo: invoice.invoiceNo,
+      outstandingBalance: invoice.outstandingBalance,
+      dueDate: invoice.dueDate,
+      daysOverdue: invoice.daysOverdue,
+    },
+    language,
+  );
+}

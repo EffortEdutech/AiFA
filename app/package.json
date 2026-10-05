@@ -13,7 +13,7 @@
     "web": "expo start --web",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-sqlite node_modules/.bin/jest"
+    "test": "node --experimental-sqlite node_modules/jest/bin/jest.js"
   },
   "dependencies": {
     "@noble/ciphers": "^2.4.0",
