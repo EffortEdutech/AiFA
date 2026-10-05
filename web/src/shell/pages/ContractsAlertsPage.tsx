@@ -36,6 +36,9 @@
  * (`resolved_via = 'solo_self_resolved'`, Vol 13_3 §3) — this page's
  * banner says so explicitly, matching every other capture-then-approve
  * flow this phase.
+ *
+ * UI polish Phase 4: presentation only — shared header, tables, labelled
+ * fields. All notes and disclosures below are kept.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -47,6 +50,7 @@ import type { Party } from "@aifa/core/sync/partyAndLedgerTransport";
 import { supabase } from "../../lib/supabaseClient";
 import { listParties } from "../../lib/partiesAndAccounts";
 import { listContracts } from "../../lib/legalCommercial";
+import { Button, Card, DataTable, Field, PageHeader, StatusPill, formatMoney, type Column } from "../../ui";
 import { useAccess } from "../AccessContext";
 
 const legalCommercialTransport = createSupabaseLegalCommercialTransport(supabase);
@@ -176,147 +180,191 @@ export function ContractsAlertsPage({ businessId, onGoToApprovals }: Props): JSX
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Contracts &amp; Alerts</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
+  const alertColumns: Column<ContractAlert>[] = [
+    { key: "type", header: "Alert", render: (a) => a.alertType },
+    { key: "contract", header: "Contract", render: (a) => contractLabel(a.contractId) },
+    { key: "trigger", header: "Trigger date", render: (a) => a.triggerDate },
+    {
+      key: "status",
+      header: "Status",
+      render: (a) => (
+        <>
+          <StatusPill status={a.status} />
+          {a.notifiedAt && <div className="ui-cell-sub">notified {a.notifiedAt.slice(0, 10)}</div>}
+        </>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      render: (a) =>
+        a.status === "pending" ? (
+          <Button size="sm" variant="secondary" loading={busyAlertId === a.id} onClick={() => void handleAcknowledge(a.id)}>
+            {busyAlertId === a.id ? "Acknowledging…" : "Acknowledge"}
+          </Button>
+        ) : null,
+    },
+  ];
+
+  const contractColumns: Column<Contract>[] = [
+    {
+      key: "contract",
+      header: "Contract",
+      render: (c) => (
+        <>
+          <strong>
+            {c.contractType} — {partyName(c.counterpartyId)}
+          </strong>
+          <div className="ui-cell-sub">
+            {c.startDate ?? "no start date"} → {c.endDate ?? "no end date"}
+            {c.autoRenew && " · auto-renew"}
+            {c.renewalNoticeDays != null && ` · ${c.renewalNoticeDays}d notice`}
+          </div>
+        </>
+      ),
+    },
+    {
+      key: "override",
+      header: "Credit limit override",
+      numeric: true,
+      render: (c) => (c.creditLimitOverride != null ? formatMoney(c.creditLimitOverride) : "—"),
+    },
+    { key: "status", header: "Status", render: (c) => <StatusPill status={c.status} /> },
+  ];
 
   return (
     <div className="aifa-page">
-      <h1>Contracts &amp; Alerts</h1>
+      <PageHeader
+        title="Contracts & Alerts"
+        actions={
+          <Button variant="primary" icon={showCreate ? undefined : "plus"} onClick={() => setShowCreate((v) => !v)}>
+            {showCreate ? "Cancel" : "New Contract"}
+          </Button>
+        }
+      />
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <strong>Due Alerts</strong>
-        </div>
-        <p className="muted" style={{ margin: "4px 0" }}>
-          Shows only alerts whose lead time (end date minus renewal-notice days) has been reached today — not
-          every Contract nearing its own end date.
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
         </p>
-        {alertError && <p className="error">{alertError}</p>}
-        {dueAlerts === null ? (
-          <p className="muted">Loading…</p>
-        ) : dueAlerts.length === 0 ? (
-          <p className="muted">No alerts due.</p>
-        ) : (
-          dueAlerts.map((a) => (
-            <div key={a.id} className="row" style={{ justifyContent: "space-between", padding: "6px 0", borderTop: "1px solid #333" }}>
-              <span>
-                {a.alertType} — {contractLabel(a.contractId)} (trigger {a.triggerDate}) — {a.status}
-                {a.notifiedAt && <span className="muted"> · notified {a.notifiedAt.slice(0, 10)}</span>}
-              </span>
-              {a.status === "pending" && (
-                <button onClick={() => void handleAcknowledge(a.id)} disabled={busyAlertId === a.id}>
-                  {busyAlertId === a.id ? "Acknowledging…" : "Acknowledge"}
-                </button>
-              )}
-            </div>
-          ))
-        )}
-      </div>
-
-      <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-        <strong>Contracts</strong>
-        <button onClick={() => setShowCreate((v) => !v)}>{showCreate ? "Cancel" : "New Contract"}</button>
-      </div>
+      )}
 
       {showCreate && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-            <select value={counterpartyId} onChange={(e) => setCounterpartyId(e.target.value)} style={{ padding: 6 }}>
-              <option value="">Select counterparty…</option>
-              {parties.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.displayName}
-                </option>
-              ))}
-            </select>
-            <select value={contractType} onChange={(e) => setContractType(e.target.value as ContractType)} style={{ padding: 6 }}>
-              {CONTRACT_TYPE_OPTIONS.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-            <input type="date" placeholder="Start date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={{ padding: 6 }} />
-            <input type="date" placeholder="End date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={{ padding: 6 }} />
-            <label className="row" style={{ gap: 4 }}>
+        <Card title="New Contract">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!createBusy && counterpartyId) void handleCreate();
+            }}
+          >
+            <div className="ui-form-grid">
+              <Field label="Counterparty" required>
+                {(p) => (
+                  <select {...p} className="ui-select" value={counterpartyId} onChange={(e) => setCounterpartyId(e.target.value)}>
+                    <option value="">Select counterparty…</option>
+                    {parties.map((pt) => (
+                      <option key={pt.id} value={pt.id}>
+                        {pt.displayName}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+              <Field label="Contract type">
+                {(p) => (
+                  <select {...p} className="ui-select" value={contractType} onChange={(e) => setContractType(e.target.value as ContractType)}>
+                    {CONTRACT_TYPE_OPTIONS.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+              <Field label="Start date">
+                {(p) => <input {...p} className="ui-input" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />}
+              </Field>
+              <Field label="End date">
+                {(p) => <input {...p} className="ui-input" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />}
+              </Field>
+              <Field label="Renewal notice days">
+                {(p) => <input {...p} className="ui-input" value={renewalNoticeDays} onChange={(e) => setRenewalNoticeDays(e.target.value)} />}
+              </Field>
+              <Field label="Credit limit override (RM, optional)">
+                {(p) => <input {...p} className="ui-input" value={creditLimitOverride} onChange={(e) => setCreditLimitOverride(e.target.value)} />}
+              </Field>
+              <Field label="Document storage ref (optional)" hint="See this page's own header for the capability caveat.">
+                {(p) => <input {...p} className="ui-input" value={documentStorageRef} onChange={(e) => setDocumentStorageRef(e.target.value)} />}
+              </Field>
+            </div>
+            <label className="ui-check" style={{ marginTop: 12 }}>
               <input type="checkbox" checked={autoRenew} onChange={(e) => setAutoRenew(e.target.checked)} />
               Auto-renew
             </label>
-            <input
-              placeholder="Renewal notice days"
-              value={renewalNoticeDays}
-              onChange={(e) => setRenewalNoticeDays(e.target.value)}
-              style={{ padding: 6, width: 160 }}
-            />
-            <input
-              placeholder="Credit limit override (RM, optional)"
-              value={creditLimitOverride}
-              onChange={(e) => setCreditLimitOverride(e.target.value)}
-              style={{ padding: 6, width: 220 }}
-            />
-            <input
-              placeholder="Document storage ref (optional — see this page's own header)"
-              value={documentStorageRef}
-              onChange={(e) => setDocumentStorageRef(e.target.value)}
-              style={{ padding: 6, width: 320 }}
-            />
-            <button onClick={() => void handleCreate()} disabled={createBusy || !counterpartyId}>
-              {createBusy ? "Creating…" : "Create Contract"}
-            </button>
-          </div>
-          <p className="muted" style={{ marginTop: 8 }}>
-            {accessModel === "solo"
-              ? "You're the sole approver — a Contract you create is approved automatically (solo_self_resolved) and moves straight to 'pending_signature', no separate review step."
-              : "A new Contract routes through the Approvals inbox before it moves from 'draft' to 'pending_signature'."}{" "}
-            {accessModel !== "solo" && onGoToApprovals && (
-              <button onClick={onGoToApprovals} style={{ padding: "0 4px" }}>
-                Go to Approvals
-              </button>
+            <div className="ui-form-actions">
+              <Button type="submit" variant="primary" loading={createBusy} disabled={!counterpartyId}>
+                {createBusy ? "Creating…" : "Create Contract"}
+              </Button>
+            </div>
+            <p className="ui-muted">
+              {accessModel === "solo"
+                ? "You're the sole approver — a Contract you create is approved automatically (solo_self_resolved) and moves straight to 'pending_signature', no separate review step."
+                : "A new Contract routes through the Approvals inbox before it moves from 'draft' to 'pending_signature'."}{" "}
+              {accessModel !== "solo" && onGoToApprovals && (
+                <button type="button" className="aifa-link-btn" onClick={onGoToApprovals}>
+                  Go to Approvals
+                </button>
+              )}
+            </p>
+            {documentAttachError && (
+              <p className="aifa-alert aifa-alert--warning" role="alert">
+                Document not attached: {documentAttachError} — the Contract itself was still created without it.
+              </p>
             )}
-          </p>
-          {documentAttachError && (
-            <p className="error" style={{ marginTop: 4 }}>
-              Document not attached: {documentAttachError} — the Contract itself was still created without it.
-            </p>
-          )}
-          {lastCreatedContractId && !createError && (
-            <p className="muted" style={{ marginTop: 4 }}>
-              Contract created (#{lastCreatedContractId.slice(0, 8)}). If it is later rejected in Approvals, its
-              draft row is deleted rather than marked "rejected" — it will simply stop appearing below.
-            </p>
-          )}
-          {createError && <p className="error">{createError}</p>}
-        </div>
+            {lastCreatedContractId && !createError && (
+              <p className="aifa-alert aifa-alert--info" role="status">
+                Contract created (#{lastCreatedContractId.slice(0, 8)}). If it is later rejected in Approvals, its
+                draft row is deleted rather than marked "rejected" — it will simply stop appearing below.
+              </p>
+            )}
+            {createError && (
+              <p className="aifa-alert aifa-alert--danger" role="alert">
+                {createError}
+              </p>
+            )}
+          </form>
+        </Card>
       )}
 
-      {contracts === null ? (
-        <p className="muted">Loading…</p>
-      ) : contracts.length === 0 ? (
-        <p className="muted">No contracts yet.</p>
-      ) : (
-        contracts.map((c) => (
-          <div key={c.id} className="card">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <strong>
-                {c.contractType} — {partyName(c.counterpartyId)}
-              </strong>
-              <span className="muted">{c.status}</span>
-            </div>
-            <p className="muted" style={{ margin: "4px 0" }}>
-              {c.startDate ?? "no start date"} → {c.endDate ?? "no end date"}
-              {c.autoRenew && " · auto-renew"}
-              {c.renewalNoticeDays != null && ` · ${c.renewalNoticeDays}d notice`}
-              {c.creditLimitOverride != null && ` · credit limit override RM${c.creditLimitOverride.toFixed(2)}`}
-            </p>
-          </div>
-        ))
+      {alertError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {alertError}
+        </p>
       )}
+
+      <Card
+        title="Due Alerts"
+        description="Shows only alerts whose lead time (end date minus renewal-notice days) has been reached today — not every Contract nearing its own end date."
+        flush
+      >
+        <DataTable
+          caption="Due contract alerts"
+          columns={alertColumns}
+          rows={loadError ? [] : dueAlerts}
+          rowKey={(a) => a.id}
+          empty={<div className="ui-table-state">No alerts due.</div>}
+        />
+      </Card>
+
+      <Card title="Contracts" flush>
+        <DataTable
+          caption="Contracts"
+          columns={contractColumns}
+          rows={loadError ? [] : contracts}
+          rowKey={(c) => c.id}
+          empty={<div className="ui-table-state">No contracts yet.</div>}
+        />
+      </Card>
     </div>
   );
 }

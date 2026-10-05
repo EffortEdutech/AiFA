@@ -15,30 +15,24 @@
  * substitute for professional advice" boundary Vol 6_9 §5 states for
  * tax. Do not present a "signed" envelope to a user as having real
  * legal e-signature backing until a real provider is wired in.
+ *
+ * UI polish Phase 4: presentation only. The SIMULATED banners and the legal
+ * validity caution are kept as alerts.
  */
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { createSupabaseLegalCommercialTransport } from "@aifa/core/sync/legalCommercialTransport";
 import type { Contract, ESignatureEnvelope } from "@aifa/core/sync/legalCommercialTransport";
 import type { Quotation } from "@aifa/core/sync/quotationInvoiceTransport";
 import type { Party } from "@aifa/core/sync/partyAndLedgerTransport";
 
+import { Button, Card, DataTable, Field, PageHeader, StatusPill, formatDate, type Column } from "../../ui";
 import { supabase } from "../../lib/supabaseClient";
 import { listParties } from "../../lib/partiesAndAccounts";
 import { listQuotations } from "../../lib/salesCycle";
 import { listContracts, listESignatureEnvelopes } from "../../lib/legalCommercial";
 
 const legalCommercialTransport = createSupabaseLegalCommercialTransport(supabase);
-
-const STUB_BANNER_STYLE: CSSProperties = {
-  padding: "8px 12px",
-  marginBottom: 12,
-  borderRadius: 6,
-  background: "#7a1f1f",
-  color: "#fff",
-  fontWeight: 700,
-  textAlign: "center",
-};
 
 const LEGAL_VALIDITY_CAUTION =
   "The e-signature provider's legal validity in your jurisdiction is a legal question outside this system's technical scope — the same boundary this system already states for tax matters. This is not legal advice; confirm with a qualified professional before relying on a stub-signed document as legally binding.";
@@ -138,112 +132,141 @@ export function ESignaturePage({ businessId }: Props): JSX.Element {
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>e-Signature</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
+  const columns: Column<ESignatureEnvelope>[] = [
+    {
+      key: "source",
+      header: "Document",
+      render: (env) => (
+        <>
+          <strong>{sourceLabel(env)}</strong>
+          <div className="ui-cell-sub">
+            provider: {env.provider} · sent {formatDate(env.createdAt)}
+          </div>
+        </>
+      ),
+    },
+    { key: "status", header: "Status", render: (env) => <StatusPill status={env.status} /> },
+    {
+      key: "actions",
+      header: "",
+      render: (env) => {
+        const busy = busyId === env.id;
+        return (
+          <div className="ui-inline-actions">
+            {env.status === "sent" && (
+              <Button size="sm" variant="secondary" disabled={busy} onClick={() => void handleAction(env.id, "viewed")}>
+                Mark Viewed
+              </Button>
+            )}
+            {(env.status === "sent" || env.status === "viewed") && (
+              <>
+                <Button size="sm" variant="primary" disabled={busy} onClick={() => void handleAction(env.id, "signed")}>
+                  Mark Signed
+                </Button>
+                <Button size="sm" variant="danger" disabled={busy} onClick={() => void handleAction(env.id, "declined")}>
+                  Mark Declined
+                </Button>
+              </>
+            )}
+            {env.status === "signed" && (
+              <span className="ui-muted">{env.contractId ? "Contract moved to 'active'." : "Quotation moved to 'accepted'."}</span>
+            )}
+          </div>
+        );
+      },
+    },
+  ];
 
   return (
     <div className="aifa-page">
-      <h1>e-Signature</h1>
+      <PageHeader title="e-Signature" description={LEGAL_VALIDITY_CAUTION} />
 
-      <div style={STUB_BANNER_STYLE}>
-        ⚠ SIMULATED — NOT CONNECTED TO A REAL E-SIGNATURE PROVIDER. The sent→viewed→signed/declined lifecycle
-        below is entirely server-simulated; no real vendor API is called.
-      </div>
-      <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>{LEGAL_VALIDITY_CAUTION}</p>
-
-      <div className="card" style={{ marginBottom: 16 }}>
-        <strong>Send a new envelope</strong>
-        <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-          <select
-            value={sourceKind}
-            onChange={(e) => {
-              setSourceKind(e.target.value as "contract" | "quotation");
-              setSourceId("");
-            }}
-            style={{ padding: 6 }}
-          >
-            <option value="contract">Contract (pending_signature)</option>
-            <option value="quotation">Quotation (sent)</option>
-          </select>
-          <select value={sourceId} onChange={(e) => setSourceId(e.target.value)} style={{ padding: 6, minWidth: 260 }}>
-            <option value="">Select…</option>
-            {sourceKind === "contract"
-              ? eligibleContracts.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.contractType} — {partyName(c.counterpartyId)}
-                  </option>
-                ))
-              : eligibleQuotations.map((q) => (
-                  <option key={q.id} value={q.id}>
-                    {q.quotationNo} — {partyName(q.partyId)}
-                  </option>
-                ))}
-          </select>
-          <button onClick={() => void handleSend()} disabled={sendBusy || !sourceId}>
-            {sendBusy ? "Sending…" : "Send Envelope"}
-          </button>
-        </div>
-        {sourceKind === "contract" && eligibleContracts.length === 0 && (
-          <p className="muted" style={{ marginTop: 6 }}>No Contracts are currently 'pending_signature'.</p>
-        )}
-        {sourceKind === "quotation" && eligibleQuotations.length === 0 && (
-          <p className="muted" style={{ marginTop: 6 }}>No Quotations are currently 'sent'.</p>
-        )}
-        {sendError && <p className="error">{sendError}</p>}
+      <div className="aifa-alert aifa-alert--danger" role="alert" style={{ textAlign: "center", fontWeight: 700 }}>
+        ⚠ SIMULATED — NOT CONNECTED TO A REAL E-SIGNATURE PROVIDER. The sent→viewed→signed/declined lifecycle below
+        is entirely server-simulated; no real vendor API is called.
       </div>
 
-      <div style={STUB_BANNER_STYLE}>⚠ SIMULATED — NOT CONNECTED TO A REAL E-SIGNATURE PROVIDER.</div>
-
-      {actionError && <p className="error">{actionError}</p>}
-
-      {envelopes === null ? (
-        <p className="muted">Loading…</p>
-      ) : envelopes.length === 0 ? (
-        <p className="muted">No e-signature envelopes yet.</p>
-      ) : (
-        envelopes.map((env) => {
-          const busy = busyId === env.id;
-          return (
-            <div key={env.id} className="card">
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <strong>{sourceLabel(env)}</strong>
-                <span className="muted">{env.status}</span>
-              </div>
-              <p className="muted" style={{ margin: "4px 0" }}>
-                provider: {env.provider} · sent {env.createdAt.slice(0, 10)}
-              </p>
-              <div className="row" style={{ gap: 8 }}>
-                {env.status === "sent" && (
-                  <button onClick={() => void handleAction(env.id, "viewed")} disabled={busy}>
-                    {busy ? "…" : "Mark Viewed"}
-                  </button>
-                )}
-                {(env.status === "sent" || env.status === "viewed") && (
-                  <>
-                    <button onClick={() => void handleAction(env.id, "signed")} disabled={busy}>
-                      {busy ? "…" : "Mark Signed"}
-                    </button>
-                    <button onClick={() => void handleAction(env.id, "declined")} disabled={busy} style={{ color: "#c0392b", borderColor: "#c0392b" }}>
-                      {busy ? "…" : "Mark Declined"}
-                    </button>
-                  </>
-                )}
-                {env.status === "signed" && (
-                  <span className="muted">
-                    {env.contractId ? "Contract moved to 'active'." : "Quotation moved to 'accepted'."}
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
       )}
+
+      <Card title="Send a new envelope">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!sendBusy && sourceId) void handleSend();
+          }}
+        >
+          <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+            <Field label="Source">
+              {(p) => (
+                <select
+                  {...p}
+                  className="ui-select"
+                  value={sourceKind}
+                  onChange={(e) => {
+                    setSourceKind(e.target.value as "contract" | "quotation");
+                    setSourceId("");
+                  }}
+                >
+                  <option value="contract">Contract (pending_signature)</option>
+                  <option value="quotation">Quotation (sent)</option>
+                </select>
+              )}
+            </Field>
+            <Field label="Document">
+              {(p) => (
+                <select {...p} className="ui-select" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
+                  <option value="">Select…</option>
+                  {sourceKind === "contract"
+                    ? eligibleContracts.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.contractType} — {partyName(c.counterpartyId)}
+                        </option>
+                      ))
+                    : eligibleQuotations.map((q) => (
+                        <option key={q.id} value={q.id}>
+                          {q.quotationNo} — {partyName(q.partyId)}
+                        </option>
+                      ))}
+                </select>
+              )}
+            </Field>
+            <Button type="submit" variant="primary" icon="send" loading={sendBusy} disabled={!sourceId}>
+              {sendBusy ? "Sending…" : "Send Envelope"}
+            </Button>
+          </div>
+          {sourceKind === "contract" && eligibleContracts.length === 0 && (
+            <p className="ui-muted">No Contracts are currently 'pending_signature'.</p>
+          )}
+          {sourceKind === "quotation" && eligibleQuotations.length === 0 && (
+            <p className="ui-muted">No Quotations are currently 'sent'.</p>
+          )}
+          {sendError && (
+            <p className="aifa-alert aifa-alert--danger" role="alert">
+              {sendError}
+            </p>
+          )}
+        </form>
+      </Card>
+
+      {actionError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {actionError}
+        </p>
+      )}
+
+      <Card title="Envelopes" flush>
+        <DataTable
+          caption="e-Signature envelopes"
+          columns={columns}
+          rows={loadError ? [] : envelopes}
+          rowKey={(env) => env.id}
+          empty={<div className="ui-table-state">No e-signature envelopes yet.</div>}
+        />
+      </Card>
     </div>
   );
 }

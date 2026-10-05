@@ -1,4 +1,4 @@
-import type { KeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 
 import { Skeleton } from "./Skeleton";
 
@@ -58,8 +58,17 @@ export function DataTable<T>({
     return <>{empty ?? <div className="ui-table-state">Nothing to show yet.</div>}</>;
   }
 
+  function handleClick(event: MouseEvent<HTMLTableRowElement>, row: T): void {
+    if (!onRowClick) return;
+    // A click on a control inside the row is that control's, not a row select.
+    if ((event.target as HTMLElement).closest("button, a, input, select, textarea, label")) return;
+    onRowClick(row);
+  }
+
   function handleKey(event: KeyboardEvent<HTMLTableRowElement>, row: T): void {
     if (!onRowClick) return;
+    // Let buttons/links/inputs inside a row handle their own keys.
+    if (event.target !== event.currentTarget) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       onRowClick(row);
@@ -98,7 +107,7 @@ export function DataTable<T>({
                     .join(" ") || undefined}
                   aria-current={selectedKey !== null && rowKey(row) === selectedKey ? "true" : undefined}
                   tabIndex={onRowClick ? 0 : undefined}
-                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onClick={onRowClick ? (e) => handleClick(e, row) : undefined}
                   onKeyDown={onRowClick ? (e) => handleKey(e, row) : undefined}
                 >
                   {columns.map((col) => (

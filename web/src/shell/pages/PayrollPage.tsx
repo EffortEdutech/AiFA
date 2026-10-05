@@ -30,6 +30,10 @@
  * controls at all; only "Payroll Admin" (and Owner) do. This is the
  * sprint's own restricted-role test case, verified by inspecting the
  * seed role_permissions directly (see this sprint's own Outcomes).
+ *
+ * UI polish Phase 4: presentation only — shared header, tables, labelled
+ * fields. The encryption-key handling, UI-level capability gate, PCB caveat and
+ * Maybank2u "unverified" warnings are unchanged.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -53,6 +57,7 @@ import {
   listBulkPaymentFileExports,
 } from "../../lib/payroll";
 import { getGrantedCapabilitiesForDomain } from "../../lib/membership";
+import { Button, Card, DataTable, Field, PageHeader, StatusPill, formatMoney, type Column } from "../../ui";
 import { useAccess } from "../AccessContext";
 import { TabStrip } from "../TabStrip";
 
@@ -69,7 +74,7 @@ interface Props {
 
 function PcbCaveat(): JSX.Element {
   return (
-    <span className="muted" style={{ fontSize: 12 }}>
+    <span className="ui-muted" style={{ fontSize: 12 }}>
       (PCB is a simplified approximation of LHDN's real PCB Schedule/Formula Method — not a filing-ready figure)
     </span>
   );
@@ -335,214 +340,368 @@ export function PayrollPage({ businessId, onGoToApprovals }: Props): JSX.Element
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Payroll</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
+  const stop = (node: JSX.Element): JSX.Element => <div onClick={(e) => e.stopPropagation()}>{node}</div>;
+
+  const employeeColumns: Column<EmployeeProfile>[] = [
+    { key: "name", header: "Employee", render: (e) => <strong>{partyName(e.partyId)}</strong> },
+    { key: "type", header: "Type", render: (e) => e.employmentType },
+    { key: "salary", header: "Basic salary / month", numeric: true, render: (e) => formatMoney(e.basicSalary) },
+    {
+      key: "hired",
+      header: "Employment",
+      render: (e) => (
+        <>
+          hired {e.hireDate}
+          {e.resignDate && <div className="ui-cell-sub">resigned {e.resignDate}</div>}
+          {e.bankName && <div className="ui-cell-sub">{e.bankName}</div>}
+        </>
+      ),
+    },
+    ...(canConfigurePayroll
+      ? [
+          {
+            key: "actions",
+            header: "",
+            render: (e: EmployeeProfile) => (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  if (revealFor === e.id) closeReveal();
+                  else {
+                    setRevealFor(e.id);
+                    setRevealed(null);
+                    setRevealError(null);
+                  }
+                }}
+              >
+                {revealFor === e.id ? "Hide sensitive details" : "View sensitive details"}
+              </Button>
+            ),
+          } as Column<EmployeeProfile>,
+        ]
+      : []),
+  ];
+
+  const revealEmployee = employees?.find((e) => e.id === revealFor) ?? null;
+
+  const runColumns: Column<PayrollRun>[] = [
+    { key: "period", header: "Period", render: (r) => <strong>{r.period}</strong> },
+    { key: "status", header: "Status", render: (r) => <StatusPill status={r.status} /> },
+    { key: "net", header: "Total net pay", numeric: true, render: (r) => formatMoney(r.totalNetPay) },
+    {
+      key: "actions",
+      header: "",
+      render: (run) => {
+        const busy = busyRunId === run.id;
+        const hasExport = (exportsByRun[run.id] ?? []).length > 0;
+        return stop(
+          <div className="ui-inline-actions">
+            {run.status === "draft" && (
+              <Button size="sm" variant="primary" loading={busy} onClick={() => void handleSubmitRun(run)}>
+                {busy ? "Submitting…" : "Submit for approval"}
+              </Button>
+            )}
+            {run.status === "approved" && canConfigurePayroll && !hasExport && (
+              <Button size="sm" variant="secondary" onClick={() => setExportKeyFor(exportKeyFor === run.id ? null : run.id)}>
+                {exportKeyFor === run.id ? "Cancel" : "Generate bulk payment file"}
+              </Button>
+            )}
+            {run.status === "approved" && !canConfigurePayroll && (
+              <span className="ui-muted">You need `payroll` configure access to generate the bulk payment file.</span>
+            )}
+            {run.status === "approved" && hasExport && (
+              <Button size="sm" variant="primary" loading={busy} onClick={() => void handleMarkPaid(run)}>
+                {busy ? "Marking paid…" : "Mark Paid (posts ledger entries now)"}
+              </Button>
+            )}
+          </div>,
+        );
+      },
+    },
+  ];
+
+  const slipColumns: Column<Payslip>[] = [
+    {
+      key: "emp",
+      header: "Employee",
+      render: (sl) => (
+        <>
+          {partyName(sl.employeePartyId)}
+          {sl.ePayslipSentAt && <div className="ui-cell-sub">sent via {sl.ePayslipChannel}</div>}
+        </>
+      ),
+    },
+    { key: "gross", header: "Gross", numeric: true, render: (sl) => formatMoney(sl.grossPay) },
+    { key: "pcb", header: "PCB", numeric: true, render: (sl) => formatMoney(sl.pcbDeduction) },
+    { key: "net", header: "Net", numeric: true, render: (sl) => formatMoney(sl.netPay) },
+  ];
+
+  const expandedRun = payrollRuns?.find((r) => r.id === expandedRunId) ?? null;
+  const exportRun = payrollRuns?.find((r) => r.id === exportKeyFor) ?? null;
+  const exportFileRun = expandedRun && (exportsByRun[expandedRun.id] ?? []).length > 0 ? expandedRun : null;
 
   return (
     <div className="aifa-page">
-      <h1>Payroll</h1>
-      <TabStrip
-        tabs={[
-          { id: "employees", label: "Employees", count: employees?.length },
-          { id: "payroll-runs", label: "Payroll Runs", count: payrollRuns?.length },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
+      <PageHeader
+        title="Payroll"
+        actions={
+          tab === "employees" ? (
+            <Button
+              variant="primary"
+              icon={showCreate ? undefined : "plus"}
+              disabled={!capabilityChecked || !canConfigurePayroll}
+              onClick={() => setShowCreate((v) => !v)}
+            >
+              {showCreate ? "Cancel" : "Add employee profile"}
+            </Button>
+          ) : undefined
+        }
+      >
+        <TabStrip
+          tabs={[
+            { id: "employees", label: "Employees", count: employees?.length },
+            { id: "payroll-runs", label: "Payroll Runs", count: payrollRuns?.length },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
+
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
 
       {tab === "employees" && (
         <>
-          <div className="row" style={{ margin: "12px 0" }}>
-            <button onClick={() => setShowCreate((s) => !s)} disabled={!capabilityChecked || !canConfigurePayroll}>
-              {showCreate ? "Cancel" : "Add employee profile"}
-            </button>
-            {capabilityChecked && !canConfigurePayroll && (
-              <span className="muted">You need `payroll` configure access to add or view sensitive employee data.</span>
-            )}
-          </div>
+          {capabilityChecked && !canConfigurePayroll && (
+            <p className="ui-muted">You need `payroll` configure access to add or view sensitive employee data.</p>
+          )}
 
           {showCreate && canConfigurePayroll && (
-            <div className="card" style={{ marginBottom: 12, borderColor: "#7a1f1f" }}>
-              <h2 style={{ fontSize: 16, marginTop: 0 }}>New employee profile</h2>
-              <p className="muted" style={{ marginTop: 0 }}>
-                IC/EPF/SOCSO/income-tax/bank-account numbers are encrypted server-side with the key below — it is
-                never stored by this app and is cleared from this form the moment you leave it.
-              </p>
-              <div className="row">
-                <select value={createPartyId} onChange={(e) => setCreatePartyId(e.target.value)} style={{ padding: 6, minWidth: 220 }}>
-                  <option value="">Select employee-typed party…</option>
-                  {employeesWithoutProfile.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.displayName}
-                    </option>
-                  ))}
-                </select>
-                <select value={createEmploymentType} onChange={(e) => setCreateEmploymentType(e.target.value as EmploymentType)} style={{ padding: 6 }}>
-                  {EMPLOYMENT_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-                <input type="date" value={createHireDate} onChange={(e) => setCreateHireDate(e.target.value)} style={{ padding: 6 }} />
-              </div>
-              {employeeParties.length === 0 && (
-                <p className="muted" style={{ marginTop: 4 }}>
-                  No party is tagged "employee" yet — add one on the Parties page first.
-                </p>
-              )}
-              <div className="row" style={{ marginTop: 8 }}>
-                <input placeholder="IC number" value={createIcNumber} onChange={(e) => setCreateIcNumber(e.target.value)} style={{ padding: 6, width: 160 }} />
-                <input placeholder="EPF number (optional)" value={createEpfNumber} onChange={(e) => setCreateEpfNumber(e.target.value)} style={{ padding: 6, width: 160 }} />
-                <input placeholder="SOCSO number (optional)" value={createSocsoNumber} onChange={(e) => setCreateSocsoNumber(e.target.value)} style={{ padding: 6, width: 160 }} />
-                <input placeholder="Income tax no (optional)" value={createIncomeTaxNo} onChange={(e) => setCreateIncomeTaxNo(e.target.value)} style={{ padding: 6, width: 160 }} />
-              </div>
-              <div className="row" style={{ marginTop: 8 }}>
-                <input placeholder="Bank name (optional)" value={createBankName} onChange={(e) => setCreateBankName(e.target.value)} style={{ padding: 6, width: 180 }} />
-                <input placeholder="Bank account no" value={createBankAccountNo} onChange={(e) => setCreateBankAccountNo(e.target.value)} style={{ padding: 6, width: 180 }} />
-                <input placeholder="Basic salary (RM)" value={createBasicSalary} onChange={(e) => setCreateBasicSalary(e.target.value)} style={{ padding: 6, width: 160 }} />
-              </div>
-              <div className="row" style={{ marginTop: 8 }}>
-                <input
-                  type="password"
-                  placeholder="Payroll encryption key"
-                  value={createKey}
-                  onChange={(e) => setCreateKey(e.target.value)}
-                  style={{ padding: 6, flex: 1 }}
-                  autoComplete="off"
-                />
-              </div>
-              <div className="row" style={{ marginTop: 10 }}>
-                <button
-                  onClick={() => void handleCreateProfile()}
-                  disabled={createBusy || !createPartyId || !createIcNumber.trim() || !createBankAccountNo.trim() || !createBasicSalary.trim() || !createHireDate || !createKey.trim()}
-                >
-                  {createBusy ? "Creating…" : "Create profile"}
-                </button>
-              </div>
-              {createError && <p className="error">{createError}</p>}
-            </div>
+            <Card
+              title="New employee profile"
+              description="IC/EPF/SOCSO/income-tax/bank-account numbers are encrypted server-side with the key below — it is never stored by this app and is cleared from this form the moment you leave it."
+            >
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (
+                    !createBusy &&
+                    createPartyId &&
+                    createIcNumber.trim() &&
+                    createBankAccountNo.trim() &&
+                    createBasicSalary.trim() &&
+                    createHireDate &&
+                    createKey.trim()
+                  )
+                    void handleCreateProfile();
+                }}
+              >
+                <div className="ui-form-grid">
+                  <Field label="Employee" required>
+                    {(p) => (
+                      <select {...p} className="ui-select" value={createPartyId} onChange={(e) => setCreatePartyId(e.target.value)}>
+                        <option value="">Select employee-typed party…</option>
+                        {employeesWithoutProfile.map((pt) => (
+                          <option key={pt.id} value={pt.id}>
+                            {pt.displayName}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </Field>
+                  <Field label="Employment type">
+                    {(p) => (
+                      <select {...p} className="ui-select" value={createEmploymentType} onChange={(e) => setCreateEmploymentType(e.target.value as EmploymentType)}>
+                        {EMPLOYMENT_TYPES.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </Field>
+                  <Field label="Hire date" required>
+                    {(p) => <input {...p} className="ui-input" type="date" value={createHireDate} onChange={(e) => setCreateHireDate(e.target.value)} />}
+                  </Field>
+                  <Field label="IC number" required>
+                    {(p) => <input {...p} className="ui-input" value={createIcNumber} onChange={(e) => setCreateIcNumber(e.target.value)} />}
+                  </Field>
+                  <Field label="EPF number (optional)">
+                    {(p) => <input {...p} className="ui-input" value={createEpfNumber} onChange={(e) => setCreateEpfNumber(e.target.value)} />}
+                  </Field>
+                  <Field label="SOCSO number (optional)">
+                    {(p) => <input {...p} className="ui-input" value={createSocsoNumber} onChange={(e) => setCreateSocsoNumber(e.target.value)} />}
+                  </Field>
+                  <Field label="Income tax no (optional)">
+                    {(p) => <input {...p} className="ui-input" value={createIncomeTaxNo} onChange={(e) => setCreateIncomeTaxNo(e.target.value)} />}
+                  </Field>
+                  <Field label="Bank name (optional)">
+                    {(p) => <input {...p} className="ui-input" value={createBankName} onChange={(e) => setCreateBankName(e.target.value)} />}
+                  </Field>
+                  <Field label="Bank account no" required>
+                    {(p) => <input {...p} className="ui-input" value={createBankAccountNo} onChange={(e) => setCreateBankAccountNo(e.target.value)} />}
+                  </Field>
+                  <Field label="Basic salary (RM)" required>
+                    {(p) => <input {...p} className="ui-input" value={createBasicSalary} onChange={(e) => setCreateBasicSalary(e.target.value)} />}
+                  </Field>
+                  <Field label="Payroll encryption key" required>
+                    {(p) => (
+                      <input {...p} className="ui-input" type="password" autoComplete="off" value={createKey} onChange={(e) => setCreateKey(e.target.value)} />
+                    )}
+                  </Field>
+                </div>
+                {employeeParties.length === 0 && (
+                  <p className="ui-muted">No party is tagged "employee" yet — add one on the Parties page first.</p>
+                )}
+                <div className="ui-form-actions">
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    loading={createBusy}
+                    disabled={
+                      !createPartyId || !createIcNumber.trim() || !createBankAccountNo.trim() || !createBasicSalary.trim() || !createHireDate || !createKey.trim()
+                    }
+                  >
+                    {createBusy ? "Creating…" : "Create profile"}
+                  </Button>
+                </div>
+                {createError && (
+                  <p className="aifa-alert aifa-alert--danger" role="alert">
+                    {createError}
+                  </p>
+                )}
+              </form>
+            </Card>
           )}
 
-          {employees === null ? (
-            <p className="muted">Loading…</p>
-          ) : employees.length === 0 ? (
-            <p className="muted">No employee profiles yet.</p>
-          ) : (
-            employees.map((e) => (
-              <div key={e.id} className="card">
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <strong>{partyName(e.partyId)}</strong>
-                  <span className="muted">{e.employmentType}</span>
-                </div>
-                <p className="muted" style={{ margin: "4px 0" }}>
-                  RM{e.basicSalary.toFixed(2)}/month · hired {e.hireDate}
-                  {e.resignDate && ` · resigned ${e.resignDate}`}
-                  {e.bankName && ` · ${e.bankName}`}
-                </p>
-                {canConfigurePayroll && (
-                  <div className="row" style={{ marginTop: 6 }}>
-                    <button
-                      onClick={() => {
-                        if (revealFor === e.id) closeReveal();
-                        else {
-                          setRevealFor(e.id);
-                          setRevealed(null);
-                          setRevealError(null);
-                        }
-                      }}
-                    >
-                      {revealFor === e.id ? "Hide sensitive details" : "View sensitive details"}
-                    </button>
+          {revealEmployee && (
+            <Card title="Sensitive details" description={partyName(revealEmployee.partyId)}>
+              {revealed === null ? (
+                <form
+                  onSubmit={(ev) => {
+                    ev.preventDefault();
+                    if (!revealBusy && revealKey.trim()) void handleReveal(revealEmployee.id);
+                  }}
+                >
+                  <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+                    <Field label="Payroll encryption key">
+                      {(p) => (
+                        <input {...p} className="ui-input" type="password" autoComplete="off" value={revealKey} onChange={(ev) => setRevealKey(ev.target.value)} />
+                      )}
+                    </Field>
+                    <Button type="submit" variant="primary" loading={revealBusy} disabled={!revealKey.trim()}>
+                      {revealBusy ? "Decrypting…" : "Decrypt"}
+                    </Button>
                   </div>
-                )}
-                {revealFor === e.id && (
-                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--aifa-border, #e2e2e2)" }}>
-                    {revealed === null ? (
-                      <>
-                        <div className="row">
-                          <input
-                            type="password"
-                            placeholder="Payroll encryption key"
-                            value={revealKey}
-                            onChange={(ev) => setRevealKey(ev.target.value)}
-                            style={{ padding: 6, flex: 1 }}
-                            autoComplete="off"
-                          />
-                          <button onClick={() => void handleReveal(e.id)} disabled={revealBusy || !revealKey.trim()}>
-                            {revealBusy ? "Decrypting…" : "Decrypt"}
-                          </button>
-                        </div>
-                        {revealError && <p className="error">{revealError}</p>}
-                      </>
-                    ) : (
-                      <>
-                        <p className="muted" style={{ margin: "2px 0" }}>IC: {String(revealed.icNumber)}</p>
-                        <p className="muted" style={{ margin: "2px 0" }}>EPF: {String(revealed.epfNumber ?? "—")}</p>
-                        <p className="muted" style={{ margin: "2px 0" }}>SOCSO: {String(revealed.socsoNumber ?? "—")}</p>
-                        <p className="muted" style={{ margin: "2px 0" }}>Income tax no: {String(revealed.incomeTaxNo ?? "—")}</p>
-                        <p className="muted" style={{ margin: "2px 0" }}>Bank account no: {String(revealed.bankAccountNo)}</p>
-                        <button onClick={closeReveal} style={{ marginTop: 6 }}>
-                          Done — clear from screen
-                        </button>
-                      </>
-                    )}
+                  {revealError && (
+                    <p className="aifa-alert aifa-alert--danger" role="alert">
+                      {revealError}
+                    </p>
+                  )}
+                </form>
+              ) : (
+                <>
+                  <ul className="ui-move-list">
+                    <li className="ui-move"><span className="ui-muted">IC</span><strong>{String(revealed.icNumber)}</strong></li>
+                    <li className="ui-move"><span className="ui-muted">EPF</span><strong>{String(revealed.epfNumber ?? "—")}</strong></li>
+                    <li className="ui-move"><span className="ui-muted">SOCSO</span><strong>{String(revealed.socsoNumber ?? "—")}</strong></li>
+                    <li className="ui-move"><span className="ui-muted">Income tax no</span><strong>{String(revealed.incomeTaxNo ?? "—")}</strong></li>
+                    <li className="ui-move"><span className="ui-muted">Bank account no</span><strong>{String(revealed.bankAccountNo)}</strong></li>
+                  </ul>
+                  <div className="ui-form-actions">
+                    <Button variant="secondary" onClick={closeReveal}>
+                      Done — clear from screen
+                    </Button>
                   </div>
-                )}
-              </div>
-            ))
+                </>
+              )}
+            </Card>
           )}
+
+          <Card flush>
+            <DataTable
+              caption="Employee profiles"
+              columns={employeeColumns}
+              rows={loadError ? [] : employees}
+              rowKey={(e) => e.id}
+              empty={<div className="ui-table-state">No employee profiles yet.</div>}
+            />
+          </Card>
         </>
       )}
 
       {tab === "payroll-runs" && (
         <>
-          <div className="card" style={{ marginBottom: 12 }}>
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>Statutory deduction calculator</h2>
-            <div className="row">
-              <input placeholder="Gross pay (RM)" value={calcGrossPay} onChange={(e) => setCalcGrossPay(e.target.value)} style={{ padding: 6, width: 160 }} />
-              <button onClick={() => void handleComputeCalc()} disabled={calcBusy || !calcGrossPay.trim()}>
-                {calcBusy ? "Computing…" : "Compute"}
-              </button>
-            </div>
-            {calcError && <p className="error">{calcError}</p>}
-            {calcResult && (
-              <div style={{ marginTop: 8 }}>
-                <p className="muted" style={{ margin: "2px 0" }}>EPF — employee RM{calcResult.epfEmployee.toFixed(2)} / employer RM{calcResult.epfEmployer.toFixed(2)}</p>
-                <p className="muted" style={{ margin: "2px 0" }}>SOCSO — employee RM{calcResult.socsoEmployee.toFixed(2)} / employer RM{calcResult.socsoEmployer.toFixed(2)}</p>
-                <p className="muted" style={{ margin: "2px 0" }}>EIS — employee RM{calcResult.eisEmployee.toFixed(2)} / employer RM{calcResult.eisEmployer.toFixed(2)}</p>
-                <p className="muted" style={{ margin: "2px 0" }}>
-                  PCB: RM{calcResult.pcbDeduction.toFixed(2)} <PcbCaveat />
-                </p>
+          <Card title="Statutory deduction calculator">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!calcBusy && calcGrossPay.trim()) void handleComputeCalc();
+              }}
+            >
+              <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+                <Field label="Gross pay (RM)">
+                  {(p) => <input {...p} className="ui-input" value={calcGrossPay} onChange={(e) => setCalcGrossPay(e.target.value)} />}
+                </Field>
+                <Button type="submit" variant="primary" loading={calcBusy} disabled={!calcGrossPay.trim()}>
+                  {calcBusy ? "Computing…" : "Compute"}
+                </Button>
               </div>
+            </form>
+            {calcError && (
+              <p className="aifa-alert aifa-alert--danger" role="alert">
+                {calcError}
+              </p>
             )}
-          </div>
+            {calcResult && (
+              <ul className="ui-move-list" style={{ marginTop: 12 }}>
+                <li className="ui-move"><span className="ui-muted">EPF</span><span>employee {formatMoney(calcResult.epfEmployee)} / employer {formatMoney(calcResult.epfEmployer)}</span></li>
+                <li className="ui-move"><span className="ui-muted">SOCSO</span><span>employee {formatMoney(calcResult.socsoEmployee)} / employer {formatMoney(calcResult.socsoEmployer)}</span></li>
+                <li className="ui-move"><span className="ui-muted">EIS</span><span>employee {formatMoney(calcResult.eisEmployee)} / employer {formatMoney(calcResult.eisEmployer)}</span></li>
+                <li className="ui-move">
+                  <span className="ui-muted">PCB</span>
+                  <span>
+                    {formatMoney(calcResult.pcbDeduction)} <PcbCaveat />
+                  </span>
+                </li>
+              </ul>
+            )}
+          </Card>
 
-          <div className="card" style={{ marginBottom: 12 }}>
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>New payroll run</h2>
-            <div className="row">
-              <input placeholder="Period (e.g. 2026-08)" value={newPeriod} onChange={(e) => setNewPeriod(e.target.value)} style={{ padding: 6, width: 160 }} />
-              <button onClick={() => void handleCreateRun()} disabled={runCreateBusy || !newPeriod.trim()}>
-                {runCreateBusy ? "Creating…" : "Create run"}
-              </button>
-            </div>
-            <p className="muted" style={{ marginTop: 4 }}>
-              Drafts a Payroll Run and one Payslip per active employee, sweeping in any approved claims/salary
-              advances for the period.
-            </p>
-            {runCreateError && <p className="error">{runCreateError}</p>}
-          </div>
+          <Card
+            title="New payroll run"
+            description="Drafts a Payroll Run and one Payslip per active employee, sweeping in any approved claims/salary advances for the period."
+          >
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!runCreateBusy && newPeriod.trim()) void handleCreateRun();
+              }}
+            >
+              <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+                <Field label="Period" hint="e.g. 2026-08">
+                  {(p) => <input {...p} className="ui-input" value={newPeriod} onChange={(e) => setNewPeriod(e.target.value)} />}
+                </Field>
+                <Button type="submit" variant="primary" loading={runCreateBusy} disabled={!newPeriod.trim()}>
+                  {runCreateBusy ? "Creating…" : "Create run"}
+                </Button>
+              </div>
+              {runCreateError && (
+                <p className="aifa-alert aifa-alert--danger" role="alert">
+                  {runCreateError}
+                </p>
+              )}
+            </form>
+          </Card>
 
-          <p className="muted" style={{ margin: "8px 0" }}>
+          <p className="ui-muted">
             A submitted payroll run always routes through the Approvals inbox — this never auto-approves.{" "}
             {onGoToApprovals ? (
-              <button onClick={onGoToApprovals} style={{ padding: "0 4px" }}>
+              <button type="button" className="aifa-link-btn" onClick={onGoToApprovals}>
                 Go to Approvals
               </button>
             ) : (
@@ -550,99 +709,81 @@ export function PayrollPage({ businessId, onGoToApprovals }: Props): JSX.Element
             )}
           </p>
 
-          {runActionError && <p className="error">{runActionError}</p>}
+          {runActionError && (
+            <p className="aifa-alert aifa-alert--danger" role="alert">
+              {runActionError}
+            </p>
+          )}
 
-          {payrollRuns === null ? (
-            <p className="muted">Loading…</p>
-          ) : payrollRuns.length === 0 ? (
-            <p className="muted">No payroll runs yet.</p>
-          ) : (
-            payrollRuns.map((run) => {
-              const busy = busyRunId === run.id;
-              const expanded = expandedRunId === run.id;
-              const exports = exportsByRun[run.id] ?? [];
-              const hasExport = exports.length > 0;
-              return (
-                <div key={run.id} className="card">
-                  <div className="row" style={{ justifyContent: "space-between", cursor: "pointer" }} onClick={() => void toggleExpand(run)}>
-                    <strong>{run.period}</strong>
-                    <span className="muted">{run.status}</span>
-                  </div>
-                  <p className="muted" style={{ margin: "4px 0" }}>Total net pay: RM{run.totalNetPay.toFixed(2)}</p>
-
-                  {expanded && (
-                    <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--aifa-border, #e2e2e2)" }}>
-                      {(payslipsByRun[run.id] ?? []).length === 0 ? (
-                        <p className="muted">No payslips loaded.</p>
-                      ) : (
-                        payslipsByRun[run.id].map((slip) => (
-                          <p key={slip.id} className="muted" style={{ margin: "2px 0" }}>
-                            {partyName(slip.employeePartyId)}: gross RM{slip.grossPay.toFixed(2)}, PCB RM{slip.pcbDeduction.toFixed(2)}, net RM{slip.netPay.toFixed(2)}
-                            {slip.ePayslipSentAt ? ` · sent via ${slip.ePayslipChannel}` : ""}
-                          </p>
-                        ))
-                      )}
-                      <p className="muted" style={{ marginTop: 4 }}>
-                        <PcbCaveat />
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
-                    {run.status === "draft" && (
-                      <button onClick={() => void handleSubmitRun(run)} disabled={busy}>
-                        {busy ? "Submitting…" : "Submit for approval"}
-                      </button>
-                    )}
-                    {run.status === "approved" && canConfigurePayroll && !hasExport && (
-                      <button onClick={() => setExportKeyFor(exportKeyFor === run.id ? null : run.id)}>
-                        {exportKeyFor === run.id ? "Cancel" : "Generate bulk payment file"}
-                      </button>
-                    )}
-                    {run.status === "approved" && !canConfigurePayroll && (
-                      <span className="muted">You need `payroll` configure access to generate the bulk payment file.</span>
-                    )}
-                    {run.status === "approved" && hasExport && (
-                      <button onClick={() => void handleMarkPaid(run)} disabled={busy}>
-                        {busy ? "Marking paid…" : "Mark Paid (posts ledger entries now)"}
-                      </button>
-                    )}
-                  </div>
-
-                  {exportKeyFor === run.id && (
-                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--aifa-border, #e2e2e2)" }}>
-                      <p className="error" style={{ margin: "4px 0" }}>
-                        ⚠ Unverified against Maybank2u — confirm with your bank before uploading this file. This CSV
-                        follows a documented-generic Malaysian bulk-pay layout, not Maybank2u's real portal template.
-                      </p>
-                      <div className="row">
-                        <input
-                          type="password"
-                          placeholder="Payroll encryption key"
-                          value={exportKey}
-                          onChange={(e) => setExportKey(e.target.value)}
-                          style={{ padding: 6, flex: 1 }}
-                          autoComplete="off"
-                        />
-                        <button onClick={() => void handleGenerateExport(run)} disabled={exportBusy || !exportKey.trim()}>
-                          {exportBusy ? "Generating…" : "Generate"}
-                        </button>
-                      </div>
-                      {exportError && <p className="error">{exportError}</p>}
-                    </div>
-                  )}
-
-                  {hasExport && (
-                    <div style={{ marginTop: 8 }}>
-                      <p className="error" style={{ margin: "4px 0" }}>
-                        ⚠ Unverified against Maybank2u — confirm with your bank before uploading this file.
-                      </p>
-                      <textarea readOnly value={exports[0].fileContent} style={{ width: "100%", height: 100, fontFamily: "monospace", fontSize: 12 }} />
-                    </div>
-                  )}
+          {exportRun && (
+            <Card title="Generate bulk payment file" description={`Payroll run ${exportRun.period}`}>
+              <p className="aifa-alert aifa-alert--warning" role="note">
+                ⚠ Unverified against Maybank2u — confirm with your bank before uploading this file. This CSV follows a
+                documented-generic Malaysian bulk-pay layout, not Maybank2u's real portal template.
+              </p>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!exportBusy && exportKey.trim()) void handleGenerateExport(exportRun);
+                }}
+              >
+                <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+                  <Field label="Payroll encryption key">
+                    {(p) => <input {...p} className="ui-input" type="password" autoComplete="off" value={exportKey} onChange={(e) => setExportKey(e.target.value)} />}
+                  </Field>
+                  <Button type="submit" variant="primary" loading={exportBusy} disabled={!exportKey.trim()}>
+                    {exportBusy ? "Generating…" : "Generate"}
+                  </Button>
                 </div>
-              );
-            })
+                {exportError && (
+                  <p className="aifa-alert aifa-alert--danger" role="alert">
+                    {exportError}
+                  </p>
+                )}
+              </form>
+            </Card>
+          )}
+
+          <Card title="Payroll runs" description="Select a run to see its payslips." flush>
+            <DataTable
+              caption="Payroll runs"
+              columns={runColumns}
+              rows={loadError ? [] : payrollRuns}
+              rowKey={(r) => r.id}
+              onRowClick={(r) => void toggleExpand(r)}
+              selectedKey={expandedRunId}
+              empty={<div className="ui-table-state">No payroll runs yet.</div>}
+            />
+          </Card>
+
+          {expandedRun && (
+            <Card title={`Payslips — ${expandedRun.period}`} flush>
+              <DataTable
+                caption="Payslips"
+                columns={slipColumns}
+                rows={payslipsByRun[expandedRun.id] ?? []}
+                rowKey={(sl) => sl.id}
+                empty={<div className="ui-table-state">No payslips loaded.</div>}
+              />
+              <p style={{ padding: "0 16px 12px" }}>
+                <PcbCaveat />
+              </p>
+            </Card>
+          )}
+
+          {exportFileRun && (
+            <Card title={`Bulk payment file — ${exportFileRun.period}`}>
+              <p className="aifa-alert aifa-alert--warning" role="note">
+                ⚠ Unverified against Maybank2u — confirm with your bank before uploading this file.
+              </p>
+              <textarea
+                className="ui-textarea"
+                aria-label="Bulk payment file contents"
+                readOnly
+                value={exportsByRun[exportFileRun.id][0].fileContent}
+                style={{ height: 100, fontFamily: "monospace", fontSize: 12 }}
+              />
+            </Card>
           )}
         </>
       )}
