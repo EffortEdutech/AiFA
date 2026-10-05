@@ -17,6 +17,9 @@
  * business it resolves in the same transaction (Vol 13_3 §3), so a
  * freshly-computed calculation already shows its real final status on
  * reload, same posture as AttendanceLeavePage.tsx.
+ *
+ * UI polish Phase 4: presentation only — tables for rules and invoices, a
+ * labelled rule form, stat tiles for Revenue vs Cost. Same calls and copy.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -25,6 +28,7 @@ import type { CommissionBasis, CommissionRule, CommissionCalculation, RevenueVsC
 import type { Party } from "@aifa/core/sync/partyAndLedgerTransport";
 import type { Invoice } from "@aifa/core/sync/quotationInvoiceTransport";
 
+import { Button, Card, DataTable, Field, PageHeader, StatGrid, StatTile, StatusPill, formatMoney, humanizeStatus, type Column } from "../../ui";
 import { supabase } from "../../lib/supabaseClient";
 import { listParties } from "../../lib/partiesAndAccounts";
 import { listInvoices } from "../../lib/salesCycle";
@@ -204,203 +208,271 @@ export function CommissionPage({ businessId, onGoToApprovals }: Props): JSX.Elem
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Commission</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
+  const ruleColumns: Column<CommissionRule>[] = [
+    {
+      key: "who",
+      header: "Applies to",
+      render: (r) => (r.appliesToPartyId ? agentName(r.appliesToPartyId) : "Business-wide default"),
+    },
+    { key: "basis", header: "Basis", render: (r) => humanizeStatus(r.basis) },
+    { key: "rate", header: "Rate", numeric: true, render: (r) => r.rate },
+    { key: "scope", header: "Product scope", render: (r) => r.productScope ?? "—" },
+  ];
+
+  const invoiceColumns: Column<Invoice>[] = [
+    {
+      key: "inv",
+      header: "Invoice",
+      render: (inv) => (
+        <>
+          <strong>{inv.invoiceNo}</strong>
+          <div className="ui-cell-sub">{agentName(agentByInvoiceId[inv.id] ?? null)}</div>
+        </>
+      ),
+    },
+    { key: "status", header: "Status", render: (inv) => <StatusPill status={inv.status} label={humanizeStatus(inv.status)} /> },
+    {
+      key: "total",
+      header: "Total",
+      numeric: true,
+      render: (inv) => (inv.currency === "MYR" ? formatMoney(inv.grandTotal) : `${inv.currency} ${inv.grandTotal.toFixed(2)}`),
+    },
+    {
+      key: "calc",
+      header: "Commission",
+      render: (inv) => {
+        const calc = calculationForInvoice(inv.id);
+        return calc ? (
+          <>
+            {formatMoney(calc.amount)} <StatusPill status={calc.status} label={humanizeStatus(calc.status)} />
+          </>
+        ) : (
+          "—"
+        );
+      },
+    },
+    {
+      key: "actions",
+      header: "",
+      render: (inv) => {
+        const agentId = agentByInvoiceId[inv.id] ?? null;
+        const calc = calculationForInvoice(inv.id);
+        const busy = busyInvoiceId === inv.id;
+        if (calc) {
+          return calc.status === "approved" ? (
+            <Button size="sm" variant="primary" loading={busy} onClick={() => void handleMarkPaid(calc)}>
+              {busy ? "Marking paid…" : "Mark commission paid"}
+            </Button>
+          ) : null;
+        }
+        return agentId ? (
+          <Button size="sm" variant="secondary" loading={busy} onClick={() => void handleCompute(inv.id)}>
+            {busy ? "Computing…" : "Compute commission"}
+          </Button>
+        ) : (
+          <Button size="sm" variant="secondary" onClick={() => setAssignAgentFor(assignAgentFor === inv.id ? null : inv.id)}>
+            {assignAgentFor === inv.id ? "Cancel" : "Assign agent"}
+          </Button>
+        );
+      },
+    },
+  ];
+
+  const assignInvoice = assignAgentFor ? invoices.find((i) => i.id === assignAgentFor) : undefined;
 
   return (
     <div className="aifa-page">
-      <h1>Commission</h1>
-      <TabStrip
-        tabs={[
-          { id: "invoices", label: "Invoices" },
-          { id: "rules", label: "Rules" },
-          { id: "dashboard", label: "Revenue vs Cost" },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
+      <PageHeader title="Commission" description="Agent commission on invoices, and revenue against payroll and commission cost.">
+        <TabStrip
+          tabs={[
+            { id: "invoices", label: "Invoices" },
+            { id: "rules", label: "Rules" },
+            { id: "dashboard", label: "Revenue vs Cost" },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
+
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
 
       {tab === "rules" && (
         <>
-          <div className="card" style={{ marginBottom: 12 }}>
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>New commission rule</h2>
-            <div className="row">
-              <select value={ruleAppliesTo} onChange={(e) => setRuleAppliesTo(e.target.value)} style={{ padding: 6, minWidth: 220 }}>
-                <option value="">Business-wide default (no specific agent)</option>
-                {agents.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.displayName}
-                  </option>
-                ))}
-              </select>
-              <select value={ruleBasis} onChange={(e) => setRuleBasis(e.target.value as CommissionBasis)} style={{ padding: 6 }}>
-                {COMMISSION_BASES.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
-              <input placeholder="Rate" value={ruleRate} onChange={(e) => setRuleRate(e.target.value)} style={{ padding: 6, width: 120 }} />
-              <input placeholder="Product scope (optional)" value={ruleProductScope} onChange={(e) => setRuleProductScope(e.target.value)} style={{ padding: 6, width: 180 }} />
-              <button onClick={() => void handleCreateRule()} disabled={ruleBusy || !ruleRate.trim()}>
-                {ruleBusy ? "Creating…" : "Create rule"}
-              </button>
-            </div>
-            <p className="muted" style={{ marginTop: 4 }}>
-              Requires `configure` on `commission`. A specific-agent rule wins over the business-wide default when
-              computing commission for that agent's invoices.
-            </p>
-            {ruleError && <p className="error">{ruleError}</p>}
-          </div>
-
-          {rules === null ? (
-            <p className="muted">Loading…</p>
-          ) : rules.length === 0 ? (
-            <p className="muted">No commission rules yet.</p>
-          ) : (
-            rules.map((r) => (
-              <div key={r.id} className="card">
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <strong>{r.appliesToPartyId ? agentName(r.appliesToPartyId) : "Business-wide default"}</strong>
-                  <span className="muted">{r.basis}</span>
-                </div>
-                <p className="muted" style={{ margin: "4px 0" }}>
-                  Rate {r.rate}
-                  {r.productScope && ` · scoped to ${r.productScope}`}
-                </p>
+          <Card
+            title="New commission rule"
+            description="Requires `configure` on `commission`. A specific-agent rule wins over the business-wide default when computing commission for that agent's invoices."
+          >
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!ruleBusy && ruleRate.trim()) void handleCreateRule();
+              }}
+            >
+              <div className="ui-form-grid">
+                <Field label="Applies to">
+                  {(p) => (
+                    <select {...p} className="ui-select" value={ruleAppliesTo} onChange={(e) => setRuleAppliesTo(e.target.value)}>
+                      <option value="">Business-wide default (no specific agent)</option>
+                      {agents.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.displayName}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </Field>
+                <Field label="Basis">
+                  {(p) => (
+                    <select {...p} className="ui-select" value={ruleBasis} onChange={(e) => setRuleBasis(e.target.value as CommissionBasis)}>
+                      {COMMISSION_BASES.map((b) => (
+                        <option key={b} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </Field>
+                <Field label="Rate" required>
+                  {(p) => <input {...p} className="ui-input" inputMode="decimal" value={ruleRate} onChange={(e) => setRuleRate(e.target.value)} />}
+                </Field>
+                <Field label="Product scope (optional)">
+                  {(p) => <input {...p} className="ui-input" value={ruleProductScope} onChange={(e) => setRuleProductScope(e.target.value)} />}
+                </Field>
               </div>
-            ))
-          )}
+              <div className="ui-form-actions">
+                <Button type="submit" variant="primary" loading={ruleBusy} disabled={!ruleRate.trim()}>
+                  {ruleBusy ? "Creating…" : "Create rule"}
+                </Button>
+              </div>
+              {ruleError && (
+                <p className="aifa-alert aifa-alert--danger" role="alert">
+                  {ruleError}
+                </p>
+              )}
+            </form>
+          </Card>
+
+          <Card flush>
+            <DataTable
+              caption="Commission rules"
+              columns={ruleColumns}
+              rows={loadError ? [] : rules}
+              rowKey={(r) => r.id}
+              empty={<div className="ui-table-state">No commission rules yet.</div>}
+            />
+          </Card>
         </>
       )}
 
       {tab === "invoices" && (
         <>
-          <p className="muted" style={{ margin: "8px 0" }}>
+          <p className="ui-muted" style={{ marginTop: 0 }}>
             {accessModel === "solo"
               ? "You're the sole approver — a computed commission is approved automatically (solo_self_resolved), no separate review step."
               : "Computing a commission routes it through the Approvals inbox before it can be marked paid."}{" "}
             {accessModel !== "solo" && onGoToApprovals && (
-              <button onClick={onGoToApprovals} style={{ padding: "0 4px" }}>
+              <button type="button" className="aifa-link-btn" onClick={onGoToApprovals}>
                 Go to Approvals
               </button>
             )}
           </p>
 
-          {computeError && <p className="error">{computeError}</p>}
-          {assignError && <p className="error">{assignError}</p>}
-
-          {invoices.length === 0 ? (
-            <p className="muted">No invoices yet.</p>
-          ) : (
-            invoices.map((inv) => {
-              const agentId = agentByInvoiceId[inv.id] ?? null;
-              const calc = calculationForInvoice(inv.id);
-              const busy = busyInvoiceId === inv.id;
-              return (
-                <div key={inv.id} className="card">
-                  <div className="row" style={{ justifyContent: "space-between" }}>
-                    <strong>{inv.invoiceNo}</strong>
-                    <span className="muted">{inv.status}</span>
-                  </div>
-                  <p className="muted" style={{ margin: "4px 0" }}>
-                    {inv.currency} {inv.grandTotal.toFixed(2)} · agent: {agentName(agentId)}
-                  </p>
-
-                  {calc ? (
-                    <p className="muted" style={{ margin: "4px 0" }}>
-                      Commission: RM{calc.amount.toFixed(2)} — <span style={calc.status === "paid" ? { color: "#1b7a3d", fontWeight: 600 } : undefined}>{calc.status}</span>
-                    </p>
-                  ) : (
-                    <div className="row" style={{ marginTop: 6, flexWrap: "wrap" }}>
-                      {agentId ? (
-                        <button onClick={() => void handleCompute(inv.id)} disabled={busy}>
-                          {busy ? "Computing…" : "Compute commission"}
-                        </button>
-                      ) : (
-                        <button onClick={() => setAssignAgentFor(assignAgentFor === inv.id ? null : inv.id)}>
-                          {assignAgentFor === inv.id ? "Cancel" : "Assign agent"}
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {calc && calc.status === "approved" && (
-                    <div className="row" style={{ marginTop: 6 }}>
-                      <button onClick={() => void handleMarkPaid(calc)} disabled={busy}>
-                        {busy ? "Marking paid…" : "Mark commission paid"}
-                      </button>
-                    </div>
-                  )}
-
-                  {assignAgentFor === inv.id && (
-                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--aifa-border, #e2e2e2)" }}>
-                      <div className="row">
-                        <select value={assignAgentId} onChange={(e) => setAssignAgentId(e.target.value)} style={{ padding: 6, minWidth: 200 }}>
-                          <option value="">Select agent-typed party…</option>
-                          {agents.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {a.displayName}
-                            </option>
-                          ))}
-                        </select>
-                        <button onClick={() => void handleAssignAgent(inv.id)} disabled={assignBusy || !assignAgentId}>
-                          {assignBusy ? "Assigning…" : "Assign"}
-                        </button>
-                      </div>
-                      {agents.length === 0 && <p className="muted" style={{ marginTop: 4 }}>No party is tagged "agent" yet — add one on the Parties page first.</p>}
-                    </div>
-                  )}
-                </div>
-              );
-            })
+          {computeError && (
+            <p className="aifa-alert aifa-alert--danger" role="alert">
+              {computeError}
+            </p>
           )}
+          {assignError && (
+            <p className="aifa-alert aifa-alert--danger" role="alert">
+              {assignError}
+            </p>
+          )}
+
+          {assignInvoice && (
+            <Card title={`Assign an agent to ${assignInvoice.invoiceNo}`}>
+              <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+                <div style={{ minWidth: 240 }}>
+                  <Field
+                    label="Agent"
+                    hint={agents.length === 0 ? 'No party is tagged "agent" yet — add one on the Parties page first.' : undefined}
+                  >
+                    {(p) => (
+                      <select {...p} className="ui-select" value={assignAgentId} onChange={(e) => setAssignAgentId(e.target.value)}>
+                        <option value="">Select agent-typed party…</option>
+                        {agents.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.displayName}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </Field>
+                </div>
+                <Button variant="primary" loading={assignBusy} disabled={!assignAgentId} onClick={() => void handleAssignAgent(assignInvoice.id)}>
+                  {assignBusy ? "Assigning…" : "Assign"}
+                </Button>
+              </div>
+            </Card>
+          )}
+
+          <Card flush>
+            <DataTable
+              caption="Invoices and their commission"
+              columns={invoiceColumns}
+              rows={loadError ? [] : invoices}
+              rowKey={(inv) => inv.id}
+              empty={<div className="ui-table-state">No invoices yet.</div>}
+            />
+          </Card>
         </>
       )}
 
       {tab === "dashboard" && (
         <>
-          <div className="row" style={{ margin: "12px 0" }}>
-            <input type="date" value={dashDateFrom} onChange={(e) => setDashDateFrom(e.target.value)} style={{ padding: 6 }} />
-            <span className="muted">to</span>
-            <input type="date" value={dashDateTo} onChange={(e) => setDashDateTo(e.target.value)} style={{ padding: 6 }} />
-            <button onClick={() => void loadDashboard()} disabled={dashBusy}>
-              {dashBusy ? "Loading…" : "Refresh"}
-            </button>
-          </div>
-          {dashError && <p className="error">{dashError}</p>}
-          {dashboard && (
-            <div className="card">
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <span>Revenue</span>
-                <strong>RM{dashboard.revenue.toFixed(2)}</strong>
-              </div>
-              <div className="row" style={{ justifyContent: "space-between", marginTop: 4 }}>
-                <span>Payroll cost</span>
-                <strong>RM{dashboard.payrollCost.toFixed(2)}</strong>
-              </div>
-              <div className="row" style={{ justifyContent: "space-between", marginTop: 4 }}>
-                <span>Commission cost</span>
-                <strong>RM{dashboard.commissionCost.toFixed(2)}</strong>
-              </div>
-              <div
-                className="row"
-                style={{ justifyContent: "space-between", marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--aifa-border, #e2e2e2)" }}
-              >
-                <span>Net</span>
-                <strong style={{ color: dashboard.net >= 0 ? "#1b7a3d" : "#c0392b" }}>RM{dashboard.net.toFixed(2)}</strong>
-              </div>
-              <p className="muted" style={{ marginTop: 8 }}>
+          <Card>
+            <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+              <Field label="From">
+                {(p) => <input {...p} className="ui-input" type="date" value={dashDateFrom} onChange={(e) => setDashDateFrom(e.target.value)} />}
+              </Field>
+              <Field label="To">
+                {(p) => <input {...p} className="ui-input" type="date" value={dashDateTo} onChange={(e) => setDashDateTo(e.target.value)} />}
+              </Field>
+              <Button variant="secondary" loading={dashBusy} onClick={() => void loadDashboard()}>
+                {dashBusy ? "Loading…" : "Refresh"}
+              </Button>
+            </div>
+          </Card>
+          {dashError && (
+            <p className="aifa-alert aifa-alert--danger" role="alert">
+              {dashError}
+            </p>
+          )}
+          {dashboard ? (
+            <>
+              <StatGrid>
+                <StatTile label="Revenue" value={formatMoney(dashboard.revenue)} />
+                <StatTile label="Payroll cost" value={formatMoney(dashboard.payrollCost)} />
+                <StatTile label="Commission cost" value={formatMoney(dashboard.commissionCost)} />
+                <StatTile label="Net" value={formatMoney(dashboard.net)} tone={dashboard.net >= 0 ? "success" : "danger"} />
+              </StatGrid>
+              <p className="ui-note">
                 Payroll cost sums approved/paid Payroll Runs whose period falls in range; commission cost sums
                 approved/paid commission calculations computed in range.
               </p>
-            </div>
+            </>
+          ) : (
+            !dashError && (
+              <StatGrid>
+                <StatTile label="Revenue" value={null} />
+                <StatTile label="Payroll cost" value={null} />
+                <StatTile label="Commission cost" value={null} />
+                <StatTile label="Net" value={null} />
+              </StatGrid>
+            )
           )}
         </>
       )}

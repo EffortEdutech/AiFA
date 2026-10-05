@@ -26,6 +26,10 @@
  * the RPC itself already enforces this server-side — never a silent
  * success, always shows the `credit_limit_override_log` row it wrote
  * back to the user afterward.
+ *
+ * UI polish Phase 4: presentation only — a quotations table; selecting a row
+ * opens its detail card, which now holds the lines and every action (WhatsApp,
+ * lifecycle, credit-limit override). Same calls, same gating, same copy.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -35,6 +39,7 @@ import { createSupabaseLegalCommercialTransport } from "@aifa/core/sync/legalCom
 import type { Party } from "@aifa/core/sync/partyAndLedgerTransport";
 import type { Product } from "@aifa/core/sync/pricingTransport";
 
+import { Button, Card, DataTable, Field, PageHeader, StatusPill, formatDate, formatMoney, humanizeStatus, type Column } from "../../ui";
 import { supabase } from "../../lib/supabaseClient";
 import { listParties } from "../../lib/partiesAndAccounts";
 import { listProducts } from "../../lib/productsAndPricing";
@@ -262,243 +267,323 @@ export function QuotationsPage({ businessId, onGoToApprovals }: Props): JSX.Elem
     }
   }
 
-  if (loadError) {
+  const filtered = (quotations ?? []).filter((q) => tab === "all" || q.status === tab);
+  const counts = (status: QuotationStatus) => (quotations ?? []).filter((q) => q.status === status).length;
+  const selected = expandedId ? (quotations ?? []).find((q) => q.id === expandedId) : undefined;
+
+  const money = (currency: string, n: number) => (currency === "MYR" ? formatMoney(n) : `${currency} ${n.toFixed(2)}`);
+
+  const columns: Column<Quotation>[] = [
+    {
+      key: "q",
+      header: "Quotation",
+      render: (q) => (
+        <>
+          <strong>{q.quotationNo}</strong>
+          <div className="ui-cell-sub">{partyName(q.partyId)}</div>
+        </>
+      ),
+    },
+    { key: "status", header: "Status", render: (q) => <StatusPill status={q.status} label={humanizeStatus(q.status)} /> },
+    { key: "issued", header: "Issued", render: (q) => formatDate(q.issueDate) },
+    { key: "valid", header: "Valid until", render: (q) => (q.validUntil ? formatDate(q.validUntil) : "—") },
+    { key: "total", header: "Total", numeric: true, render: (q) => money(q.currency, q.grandTotal) },
+  ];
+
+  function renderDetail(q: Quotation): JSX.Element {
+    const busy = busyId === q.id;
+    const qLines = linesById[q.id] ?? [];
+    const lineColumns: Column<SalesLine>[] = [
+      { key: "desc", header: "Description", render: (l) => l.description },
+      { key: "qty", header: "Qty", numeric: true, render: (l) => l.quantity },
+      { key: "price", header: "Unit price", numeric: true, render: (l) => formatMoney(l.unitPrice) },
+      { key: "total", header: "Line total", numeric: true, render: (l) => formatMoney(l.lineTotal) },
+    ];
     return (
-      <div className="aifa-page">
-        <h1>Quotations</h1>
-        <p className="error">{loadError}</p>
-      </div>
+      <Card
+        title={`${q.quotationNo} — ${partyName(q.partyId)}`}
+        description={`${money(q.currency, q.grandTotal)} · issued ${formatDate(q.issueDate)}${q.validUntil ? ` · valid until ${formatDate(q.validUntil)}` : ""}`}
+        actions={
+          <Button size="sm" variant="ghost" onClick={() => setExpandedId(null)}>
+            Close
+          </Button>
+        }
+      >
+        <DataTable
+          caption="Quotation lines"
+          columns={lineColumns}
+          rows={linesById[q.id] ? qLines : null}
+          rowKey={(l) => l.id}
+          skeletonRows={2}
+          empty={<div className="ui-table-state">No lines.</div>}
+        />
+
+        <div className="ui-inline-actions" style={{ marginTop: "var(--aifa-space-4)" }}>
+          {q.status === "draft" && (
+            <Button variant="secondary" icon="send" loading={busy} onClick={() => void handleBuildLink(q)}>
+              Get WhatsApp link
+            </Button>
+          )}
+          {q.status === "draft" && (
+            <Button variant="secondary" disabled={busy} onClick={() => void handleLifecycle(q, "sent")}>
+              Mark Sent (I tapped Send in WhatsApp)
+            </Button>
+          )}
+          {q.status === "sent" && (
+            <>
+              <Button variant="primary" disabled={busy} onClick={() => void handleLifecycle(q, "accepted")}>
+                Mark Accepted
+              </Button>
+              <Button variant="danger" disabled={busy} onClick={() => void handleLifecycle(q, "rejected")}>
+                Mark Rejected
+              </Button>
+            </>
+          )}
+          {q.status === "accepted" && (
+            <Button variant="primary" loading={busy} onClick={() => void handleLifecycle(q, "convert")}>
+              {busy ? "Converting…" : "Convert to Invoice"}
+            </Button>
+          )}
+          {q.status === "converted_to_invoice" && q.convertedInvoiceId && (
+            <span className="ui-muted">→ Invoice #{q.convertedInvoiceId.slice(0, 8)}</span>
+          )}
+        </div>
+
+        {waMessageById[q.id] && (
+          <div className="ui-panel">
+            <Field label="WhatsApp message (edit before opening)">
+              {(p) => (
+                <textarea
+                  {...p}
+                  className="ui-textarea"
+                  value={waMessageById[q.id].messageText}
+                  onChange={(e) =>
+                    setWaMessageById((prev) => ({ ...prev, [q.id]: { ...prev[q.id], messageText: e.target.value } }))
+                  }
+                  rows={3}
+                />
+              )}
+            </Field>
+            <p className="ui-note">
+              Review/edit the message above before opening WhatsApp — it will not be sent until you tap Send there
+              yourself.
+            </p>
+            <div className="ui-inline-actions" style={{ marginTop: "var(--aifa-space-2)" }}>
+              <a
+                className="ui-btn ui-btn--primary ui-btn--sm"
+                href={waLinkFor(q) ?? "#"}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open WhatsApp
+              </a>
+            </div>
+          </div>
+        )}
+
+        {creditBlockedId === q.id && (
+          <div style={{ marginTop: "var(--aifa-space-3)" }}>
+            <p className="aifa-alert aifa-alert--danger" role="alert">
+              Blocked: converting this quotation would exceed the party's credit limit.
+              {canOverrideCreditLimit
+                ? " You can override this below — it will be logged with your reason."
+                : " An Owner or Bookkeeper with settings-configure access can review and override this — contact one of them if this needs to proceed today."}
+            </p>
+            {canOverrideCreditLimit && (
+              <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+                <div style={{ flex: 1, minWidth: 240 }}>
+                  <Field label="Override reason (recorded in the log)">
+                    {(p) => (
+                      <input {...p} className="ui-input" value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} />
+                    )}
+                  </Field>
+                </div>
+                <Button variant="danger" loading={overrideBusyId === q.id} onClick={() => void handleCreditOverride(q)}>
+                  {overrideBusyId === q.id ? "Overriding…" : "Override & Convert to Invoice"}
+                </Button>
+              </div>
+            )}
+            {overrideError && (
+              <p className="aifa-alert aifa-alert--danger" role="alert">
+                {overrideError}
+              </p>
+            )}
+          </div>
+        )}
+        {overrideResultById[q.id] && (
+          <p className="aifa-alert aifa-alert--info" role="status">
+            {overrideResultById[q.id]}
+          </p>
+        )}
+      </Card>
     );
   }
 
-  const filtered = (quotations ?? []).filter((q) => tab === "all" || q.status === tab);
-  const counts = (status: QuotationStatus) => (quotations ?? []).filter((q) => q.status === status).length;
-
   return (
     <div className="aifa-page">
-      <h1>Quotations</h1>
-      <TabStrip
-        tabs={[
-          { id: "all", label: "All", count: quotations?.length },
-          { id: "draft", label: "Draft", count: counts("draft") },
-          { id: "sent", label: "Sent", count: counts("sent") },
-          { id: "accepted", label: "Accepted", count: counts("accepted") },
-          { id: "rejected", label: "Rejected", count: counts("rejected") },
-          { id: "expired", label: "Expired", count: counts("expired") },
-          { id: "converted_to_invoice", label: "Converted", count: counts("converted_to_invoice") },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
+      <PageHeader
+        title="Quotations"
+        description="A newly created quotation routes through the Approvals inbox before it can be sent."
+        actions={
+          <>
+            {onGoToApprovals && (
+              <Button variant="secondary" onClick={onGoToApprovals}>
+                Go to Approvals
+              </Button>
+            )}
+            <Button variant="primary" icon={showCreate ? undefined : "plus"} onClick={() => setShowCreate((s) => !s)}>
+              {showCreate ? "Cancel" : "New quotation"}
+            </Button>
+          </>
+        }
+      >
+        <TabStrip
+          tabs={[
+            { id: "all", label: "All", count: quotations?.length },
+            { id: "draft", label: "Draft", count: counts("draft") },
+            { id: "sent", label: "Sent", count: counts("sent") },
+            { id: "accepted", label: "Accepted", count: counts("accepted") },
+            { id: "rejected", label: "Rejected", count: counts("rejected") },
+            { id: "expired", label: "Expired", count: counts("expired") },
+            { id: "converted_to_invoice", label: "Converted", count: counts("converted_to_invoice") },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
+      {!onGoToApprovals && (
+        <p className="ui-muted" style={{ marginTop: 0 }}>
+          See the Approvals sidebar item.
+        </p>
+      )}
 
-      <p className="muted" style={{ margin: "8px 0" }}>
-        A newly created quotation routes through the Approvals inbox before it can be sent.{" "}
-        {onGoToApprovals ? (
-          <button onClick={onGoToApprovals} style={{ padding: "0 4px" }}>
-            Go to Approvals
-          </button>
-        ) : (
-          "See the Approvals sidebar item."
-        )}
-      </p>
-
-      <div className="row" style={{ margin: "12px 0" }}>
-        <button onClick={() => setShowCreate((s) => !s)}>{showCreate ? "Cancel" : "New quotation"}</button>
-      </div>
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
 
       {showCreate && (
-        <div className="card">
-          <h2 style={{ fontSize: 16, marginTop: 0 }}>New quotation</h2>
-          <div className="row">
-            <select value={partyId} onChange={(e) => setPartyId(e.target.value)} style={{ padding: 6, minWidth: 220 }}>
-              <option value="">Select party…</option>
-              {parties.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.displayName}
-                </option>
-              ))}
-            </select>
-            <input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} style={{ padding: 6 }} />
-          </div>
-          <div className="row" style={{ marginTop: 8 }}>
-            <input
-              placeholder="Notes (optional)"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              style={{ padding: 6, flex: 1 }}
-            />
-          </div>
-
-          <h3 style={{ fontSize: 14, marginTop: 12, marginBottom: 4 }}>Lines</h3>
-          {lines.map((l, idx) => (
-            <div key={idx} className="row" style={{ marginTop: 4 }}>
-              <select
-                value={l.productId}
-                onChange={(e) => updateLine(idx, { productId: e.target.value })}
-                style={{ padding: 6, minWidth: 180 }}
-              >
-                <option value="">Non-catalog line…</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.sku})
-                  </option>
-                ))}
-              </select>
-              <input
-                placeholder="Description"
-                value={l.description}
-                onChange={(e) => updateLine(idx, { description: e.target.value })}
-                style={{ padding: 6, flex: 1, minWidth: 140 }}
-              />
-              <input
-                placeholder="Qty"
-                value={l.quantity}
-                onChange={(e) => updateLine(idx, { quantity: e.target.value })}
-                style={{ padding: 6, width: 70 }}
-              />
-              <input
-                placeholder="Price override"
-                value={l.unitPriceOverride}
-                onChange={(e) => updateLine(idx, { unitPriceOverride: e.target.value })}
-                style={{ padding: 6, width: 120 }}
-                title="Leave blank to resolve via PRICE-001 against this party (requires selecting a product)."
-              />
-              {lines.length > 1 && (
-                <button onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))} style={{ padding: "0 6px" }}>
-                  ✕
-                </button>
-              )}
+        <Card title="New quotation">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!createBusy && partyId) void handleCreate();
+            }}
+          >
+            <div className="ui-form-grid">
+              <Field label="Party" required>
+                {(p) => (
+                  <select {...p} className="ui-select" value={partyId} onChange={(e) => setPartyId(e.target.value)}>
+                    <option value="">Select party…</option>
+                    {parties.map((pt) => (
+                      <option key={pt.id} value={pt.id}>
+                        {pt.displayName}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+              <Field label="Valid until">
+                {(p) => <input {...p} className="ui-input" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />}
+              </Field>
+              <Field label="Notes (optional)">
+                {(p) => <input {...p} className="ui-input" value={notes} onChange={(e) => setNotes(e.target.value)} />}
+              </Field>
             </div>
-          ))}
-          <div className="row" style={{ marginTop: 6 }}>
-            <button onClick={() => setLines((prev) => [...prev, emptyLine()])}>Add line</button>
-          </div>
 
-          <div className="row" style={{ marginTop: 10 }}>
-            <button onClick={() => void handleCreate()} disabled={createBusy || !partyId}>
-              {createBusy ? "Creating…" : "Create quotation"}
-            </button>
-          </div>
-          {createError && <p className="error">{createError}</p>}
-        </div>
-      )}
-
-      {actionError && <p className="error">{actionError}</p>}
-
-      {quotations === null ? (
-        <p className="muted">Loading…</p>
-      ) : filtered.length === 0 ? (
-        <p className="muted">No quotations in this view.</p>
-      ) : (
-        filtered.map((q) => {
-          const busy = busyId === q.id;
-          const expanded = expandedId === q.id;
-          return (
-            <div key={q.id} className="card">
-              <div className="row" style={{ justifyContent: "space-between", cursor: "pointer" }} onClick={() => void toggleExpand(q)}>
-                <strong>
-                  {q.quotationNo} — {partyName(q.partyId)}
-                </strong>
-                <span className="muted">{q.status}</span>
+            <h3 className="ui-section-title">Lines</h3>
+            {lines.map((l, idx) => (
+              <div key={idx} className="ui-inline-actions" style={{ marginBottom: "var(--aifa-space-2)" }}>
+                <select
+                  className="ui-select"
+                  aria-label={`Line ${idx + 1} product`}
+                  value={l.productId}
+                  onChange={(e) => updateLine(idx, { productId: e.target.value })}
+                  style={{ minWidth: 180 }}
+                >
+                  <option value="">Non-catalog line…</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.sku})
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="ui-input"
+                  aria-label={`Line ${idx + 1} description`}
+                  placeholder="Description"
+                  value={l.description}
+                  onChange={(e) => updateLine(idx, { description: e.target.value })}
+                  style={{ flex: 1, minWidth: 140 }}
+                />
+                <input
+                  className="ui-input"
+                  aria-label={`Line ${idx + 1} quantity`}
+                  placeholder="Qty"
+                  inputMode="decimal"
+                  value={l.quantity}
+                  onChange={(e) => updateLine(idx, { quantity: e.target.value })}
+                  style={{ width: 80 }}
+                />
+                <input
+                  className="ui-input"
+                  aria-label={`Line ${idx + 1} price override`}
+                  placeholder="Price override"
+                  inputMode="decimal"
+                  value={l.unitPriceOverride}
+                  onChange={(e) => updateLine(idx, { unitPriceOverride: e.target.value })}
+                  style={{ width: 130 }}
+                  title="Leave blank to resolve via PRICE-001 against this party (requires selecting a product)."
+                />
+                {lines.length > 1 && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon="x"
+                    aria-label={`Remove line ${idx + 1}`}
+                    onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
+                  />
+                )}
               </div>
-              <p className="muted" style={{ margin: "4px 0" }}>
-                {q.currency} {q.grandTotal.toFixed(2)} · issued {q.issueDate}
-                {q.validUntil && ` · valid until ${q.validUntil}`}
+            ))}
+            <Button size="sm" variant="secondary" icon="plus" onClick={() => setLines((prev) => [...prev, emptyLine()])}>
+              Add line
+            </Button>
+
+            <div className="ui-form-actions">
+              <Button type="submit" variant="primary" loading={createBusy} disabled={!partyId}>
+                {createBusy ? "Creating…" : "Create quotation"}
+              </Button>
+            </div>
+            {createError && (
+              <p className="aifa-alert aifa-alert--danger" role="alert">
+                {createError}
               </p>
-              {expanded && (
-                <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--aifa-border, #e2e2e2)" }}>
-                  {(linesById[q.id] ?? []).length === 0 ? (
-                    <p className="muted">Loading lines…</p>
-                  ) : (
-                    linesById[q.id].map((l) => (
-                      <p key={l.id} className="muted" style={{ margin: "2px 0" }}>
-                        {l.quantity} × {l.description} @ RM{l.unitPrice.toFixed(2)} = RM{l.lineTotal.toFixed(2)}
-                      </p>
-                    ))
-                  )}
-                </div>
-              )}
-
-              <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
-                {q.status === "draft" && (
-                  <button onClick={() => void handleBuildLink(q)} disabled={busy}>
-                    {busy ? "…" : "Get WhatsApp link"}
-                  </button>
-                )}
-                {waMessageById[q.id] && (
-                  <>
-                    <textarea
-                      value={waMessageById[q.id].messageText}
-                      onChange={(e) =>
-                        setWaMessageById((prev) => ({ ...prev, [q.id]: { ...prev[q.id], messageText: e.target.value } }))
-                      }
-                      rows={3}
-                      style={{ width: "100%", padding: 6, marginTop: 6 }}
-                    />
-                    <p className="muted" style={{ margin: "4px 0" }}>
-                      Review/edit the message above before opening WhatsApp — it will not be sent until you tap Send
-                      there yourself.
-                    </p>
-                    <a href={waLinkFor(q) ?? "#"} target="_blank" rel="noreferrer">
-                      Open WhatsApp
-                    </a>
-                  </>
-                )}
-                {q.status === "draft" && (
-                  <button onClick={() => void handleLifecycle(q, "sent")} disabled={busy}>
-                    Mark Sent (I tapped Send in WhatsApp)
-                  </button>
-                )}
-                {q.status === "sent" && (
-                  <>
-                    <button onClick={() => void handleLifecycle(q, "accepted")} disabled={busy}>
-                      Mark Accepted
-                    </button>
-                    <button onClick={() => void handleLifecycle(q, "rejected")} disabled={busy} style={{ color: "#c0392b", borderColor: "#c0392b" }}>
-                      Mark Rejected
-                    </button>
-                  </>
-                )}
-                {q.status === "accepted" && (
-                  <button onClick={() => void handleLifecycle(q, "convert")} disabled={busy}>
-                    {busy ? "Converting…" : "Convert to Invoice"}
-                  </button>
-                )}
-                {q.status === "converted_to_invoice" && q.convertedInvoiceId && (
-                  <span className="muted">→ Invoice #{q.convertedInvoiceId.slice(0, 8)}</span>
-                )}
-              </div>
-              {creditBlockedId === q.id && (
-                <div style={{ marginTop: 6 }}>
-                  <p className="error">
-                    Blocked: converting this quotation would exceed the party's credit limit.
-                    {canOverrideCreditLimit
-                      ? " You can override this below — it will be logged with your reason."
-                      : " An Owner or Bookkeeper with settings-configure access can review and override this — contact one of them if this needs to proceed today."}
-                  </p>
-                  {canOverrideCreditLimit && (
-                    <div className="row" style={{ gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-                      <input
-                        placeholder="Override reason (recorded in the log)"
-                        value={overrideReason}
-                        onChange={(e) => setOverrideReason(e.target.value)}
-                        style={{ padding: 6, minWidth: 260 }}
-                      />
-                      <button onClick={() => void handleCreditOverride(q)} disabled={overrideBusyId === q.id}>
-                        {overrideBusyId === q.id ? "Overriding…" : "Override & Convert to Invoice"}
-                      </button>
-                    </div>
-                  )}
-                  {overrideError && <p className="error" style={{ marginTop: 4 }}>{overrideError}</p>}
-                </div>
-              )}
-              {overrideResultById[q.id] && (
-                <p className="muted" style={{ marginTop: 6 }}>{overrideResultById[q.id]}</p>
-              )}
-            </div>
-          );
-        })
+            )}
+          </form>
+        </Card>
       )}
+
+      {actionError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {actionError}
+        </p>
+      )}
+
+      {selected && renderDetail(selected)}
+
+      <Card flush>
+        <DataTable
+          caption="Quotations"
+          columns={columns}
+          rows={loadError ? [] : quotations === null ? null : filtered}
+          rowKey={(q) => q.id}
+          onRowClick={(q) => void toggleExpand(q)}
+          selectedKey={expandedId}
+          empty={<div className="ui-table-state">No quotations in this view.</div>}
+        />
+      </Card>
     </div>
   );
 }
