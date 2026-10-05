@@ -116,7 +116,7 @@ export function CaptureResolveForm({ core, buildIntake }: Props): JSX.Element | 
               </option>
             ))}
           </select>
-          <select className="ui-select" value={core.paymentMethod} onChange={(e) => core.setPaymentMethod(e.target.value as (typeof PAYMENT_METHODS)[number])}>
+          <select className="ui-select" aria-label="Payment method" value={core.paymentMethod} onChange={(e) => core.setPaymentMethod(e.target.value as (typeof PAYMENT_METHODS)[number])}>
             {PAYMENT_METHODS.map((m) => (
               <option key={m} value={m}>
                 {m}
@@ -241,7 +241,7 @@ export function CaptureResolveForm({ core, buildIntake }: Props): JSX.Element | 
                 </option>
               ))}
             </select>
-            <select className="ui-select"
+            <select className="ui-select" aria-label="Clock type"
               value={core.correctionClockType}
               onChange={(e) => core.setCorrectionClockType(e.target.value as "in" | "out")}
             >
@@ -372,7 +372,7 @@ export function CaptureResolveForm({ core, buildIntake }: Props): JSX.Element | 
               onChange={(e) => core.setCounterpartyName(e.target.value)}
               placeholder="Counterparty name…"
             />
-            <select className="ui-select"
+            <select className="ui-select" aria-label="Contract type"
               value={core.contractType}
               onChange={(e) => core.setContractType(e.target.value as typeof core.contractType)}
             >
