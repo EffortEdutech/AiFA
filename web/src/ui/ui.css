@@ -276,3 +276,10 @@
   .ui-skeleton, .ui-spinner { animation: none; }
   .ui-btn { transition: none; }
 }
+
+/* UI polish Phase 4 — Capture */
+.ui-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.ui-dropzone { margin-top: var(--aifa-space-3); padding: var(--aifa-space-5); border: 1px dashed var(--aifa-border-strong, var(--aifa-border)); border-radius: var(--aifa-radius-md); text-align: center; color: var(--aifa-text-muted); font-size: var(--aifa-font-size-sm); transition: background-color .15s, border-color .15s; }
+.ui-dropzone.is-over { background: var(--aifa-accent-tint, var(--aifa-surface-muted)); border-color: var(--aifa-accent); }
+.ui-dropzone__browse { color: var(--aifa-primary-700); text-decoration: underline; cursor: pointer; }
+.ui-dropzone__browse:focus-within { outline: 2px solid var(--aifa-accent); outline-offset: 2px; border-radius: 2px; }

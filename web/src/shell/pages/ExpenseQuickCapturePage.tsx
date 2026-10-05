@@ -16,6 +16,9 @@
  * is a real PaymentVoucher and shows up in the Payment Vouchers page's
  * own list immediately (same table, same RLS, same approval routing) --
  * this page adds no new data shape, only a faster form.
+ *
+ * UI polish Phase 4: presentation only — labelled fields, shared buttons
+ * and a recent-captures table; the same createPaymentVoucher call.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -23,6 +26,7 @@ import { createSupabasePaymentVouchersReportsTransport } from "@aifa/core/sync/p
 import type { PaymentVoucherPaymentMethod } from "@aifa/core/sync/paymentVouchersReportsTransport";
 import type { Party, ChartOfAccount } from "@aifa/core/sync/partyAndLedgerTransport";
 
+import { Button, Card, DataTable, Field, PageHeader, StatusPill, formatMoney, humanizeStatus, type Column } from "../../ui";
 import { supabase } from "../../lib/supabaseClient";
 import { listParties, listChartOfAccounts } from "../../lib/partiesAndAccounts";
 import { listPaymentVouchers } from "../../lib/purchasesAndCash";
@@ -102,91 +106,150 @@ export function ExpenseQuickCapturePage({ businessId, onGoToPaymentVouchers }: P
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Expense</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
+  const canCapture = Boolean(payeePartyId && expenseCategory && grandTotal.trim());
+
+  const columns: Column<PaymentVoucher>[] = [
+    {
+      key: "pv",
+      header: "Voucher",
+      render: (pv) => (
+        <>
+          <strong>{pv.pvNo}</strong>
+          <div className="ui-cell-sub">{partyName(pv.payeePartyId)}</div>
+        </>
+      ),
+    },
+    { key: "cat", header: "Category", render: (pv) => pv.expenseCategory },
+    {
+      key: "status",
+      header: "Status",
+      render: (pv) => (
+        <StatusPill
+          status={pv.status}
+          label={pv.status === "approved" ? "Approved — not yet paid" : humanizeStatus(pv.status)}
+        />
+      ),
+    },
+    {
+      key: "total",
+      header: "Amount",
+      numeric: true,
+      render: (pv) => (pv.currency === "MYR" ? formatMoney(pv.grandTotal) : `${pv.currency} ${pv.grandTotal.toFixed(2)}`),
+    },
+  ];
 
   return (
     <div className="aifa-page">
-      <h1>Expense</h1>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Quick capture — creates a Payment Voucher the same as the full form on the Payment Vouchers page.{" "}
-        {onGoToPaymentVouchers ? (
-          <button onClick={onGoToPaymentVouchers} style={{ padding: "0 4px" }}>
-            View all / mark paid
-          </button>
-        ) : (
-          "See the Payment Vouchers sidebar item for the full list and Mark Paid."
-        )}
-      </p>
-
-      <div className="card">
-        <div className="row">
-          <select value={payeePartyId} onChange={(e) => setPayeePartyId(e.target.value)} style={{ padding: 6, minWidth: 200 }}>
-            <option value="">Select payee…</option>
-            {parties.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.displayName}
-              </option>
-            ))}
-          </select>
-          <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)} style={{ padding: 6, minWidth: 180 }}>
-            <option value="">Category…</option>
-            {expenseAccounts.map((a) => (
-              <option key={a.id} value={a.accountName}>
-                {a.accountName}
-              </option>
-            ))}
-          </select>
-        </div>
-        {expenseAccounts.length === 0 && (
-          <p className="muted" style={{ marginTop: 4 }}>
-            No expense-type accounts found in your Chart of Accounts yet — add one there first.
-          </p>
-        )}
-        <div className="row" style={{ marginTop: 8 }}>
-          <input placeholder="Amount (RM)" value={grandTotal} onChange={(e) => setGrandTotal(e.target.value)} style={{ padding: 6, width: 140 }} />
-          <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentVoucherPaymentMethod)} style={{ padding: 6 }}>
-            {PAYMENT_METHODS.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-          <input placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} style={{ padding: 6, flex: 1 }} />
-        </div>
-        <div className="row" style={{ marginTop: 10 }}>
-          <button onClick={() => void handleCapture()} disabled={busy || !payeePartyId || !expenseCategory || !grandTotal.trim()}>
-            {busy ? "Capturing…" : "Capture expense"}
-          </button>
-        </div>
-        {justCreated && <p className="muted">Captured — routed to Approvals like any other Payment Voucher.</p>}
-        {error && <p className="error">{error}</p>}
-      </div>
-
-      <h2 style={{ fontSize: 14, marginTop: 20 }}>Recently captured</h2>
-      {recent.length === 0 ? (
-        <p className="muted">Nothing captured yet.</p>
-      ) : (
-        recent.map((pv) => (
-          <div key={pv.id} className="card">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <strong>
-                {pv.pvNo} — {partyName(pv.payeePartyId)}
-              </strong>
-              <span className="muted">{pv.status === "approved" ? "Approved — not yet paid" : pv.status}</span>
-            </div>
-            <p className="muted" style={{ margin: "4px 0" }}>
-              {pv.currency} {pv.grandTotal.toFixed(2)} · {pv.expenseCategory}
-            </p>
-          </div>
-        ))
+      <PageHeader
+        title="Expense"
+        description="Quick capture — creates a Payment Voucher the same as the full form on the Payment Vouchers page."
+        actions={
+          onGoToPaymentVouchers ? (
+            <Button variant="secondary" onClick={onGoToPaymentVouchers}>
+              View all / mark paid
+            </Button>
+          ) : undefined
+        }
+      />
+      {!onGoToPaymentVouchers && (
+        <p className="ui-muted" style={{ marginTop: 0 }}>
+          See the Payment Vouchers sidebar item for the full list and Mark Paid.
+        </p>
       )}
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
+
+      <Card title="Capture an expense">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!busy && canCapture) void handleCapture();
+          }}
+        >
+          <div className="ui-form-grid">
+            <Field label="Payee" required>
+              {(p) => (
+                <select {...p} className="ui-select" value={payeePartyId} onChange={(e) => setPayeePartyId(e.target.value)}>
+                  <option value="">Select payee…</option>
+                  {parties.map((party) => (
+                    <option key={party.id} value={party.id}>
+                      {party.displayName}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
+            <Field
+              label="Category"
+              required
+              hint={expenseAccounts.length === 0 ? "No expense-type accounts found in your Chart of Accounts yet — add one there first." : undefined}
+            >
+              {(p) => (
+                <select {...p} className="ui-select" value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)}>
+                  <option value="">Category…</option>
+                  {expenseAccounts.map((a) => (
+                    <option key={a.id} value={a.accountName}>
+                      {a.accountName}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
+            <Field label="Amount (RM)" required>
+              {(p) => <input {...p} className="ui-input" inputMode="decimal" value={grandTotal} onChange={(e) => setGrandTotal(e.target.value)} />}
+            </Field>
+            <Field label="Payment method">
+              {(p) => (
+                <select
+                  {...p}
+                  className="ui-select"
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value as PaymentVoucherPaymentMethod)}
+                >
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
+          </div>
+          <div style={{ marginTop: "var(--aifa-space-4)" }}>
+            <Field label="Notes (optional)">
+              {(p) => <input {...p} className="ui-input" value={notes} onChange={(e) => setNotes(e.target.value)} />}
+            </Field>
+          </div>
+          <div className="ui-form-actions">
+            <Button type="submit" variant="primary" loading={busy} disabled={!canCapture}>
+              {busy ? "Capturing…" : "Capture expense"}
+            </Button>
+          </div>
+          {justCreated && (
+            <p className="aifa-alert aifa-alert--success" role="status">
+              Captured — routed to Approvals like any other Payment Voucher.
+            </p>
+          )}
+          {error && (
+            <p className="aifa-alert aifa-alert--danger" role="alert">
+              {error}
+            </p>
+          )}
+        </form>
+      </Card>
+
+      <Card title="Recently captured" flush>
+        <DataTable
+          caption="Recently captured expenses"
+          columns={columns}
+          rows={loadError ? [] : recent}
+          rowKey={(pv) => pv.id}
+          empty={<div className="ui-table-state">Nothing captured yet.</div>}
+        />
+      </Card>
     </div>
   );
 }

@@ -24,6 +24,7 @@
  */
 import { createTextChannelIntake } from "@aifa/core/ai/channelIntake";
 
+import { Button, Card, Field, PageHeader } from "../../ui";
 import { useCaptureRouterCore } from "../captureRouter/useCaptureRouterCore";
 import { CaptureResolveForm } from "../captureRouter/CaptureResolveForm";
 import { CaptureTriageList } from "../captureRouter/CaptureTriageList";
@@ -47,23 +48,28 @@ export function CaptureRouterPage({ businessId, onGoToApprovals }: Props): JSX.E
   if (core.loadError) {
     return (
       <div className="aifa-page">
-        <h1>Quick Capture (AI)</h1>
-        <p className="error">{core.loadError}</p>
+        <PageHeader title="Quick Capture (AI)" />
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {core.loadError}
+        </p>
       </div>
     );
   }
 
   return (
     <div className="aifa-page">
-      <h1>Quick Capture (AI)</h1>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Describe what happened in plain text — an expense or a leave application — and let AI figure out which
-        screen it belongs on. This is additive to (not a replacement for) the dedicated Expense and Attendance &amp;
-        Leave pages, and posts through the exact same calls they do{onGoToApprovals ? (
+      <PageHeader
+        title="Quick Capture (AI)"
+        description="Describe what happened in plain text — an expense or a leave application — and let AI figure out which screen it belongs on."
+      />
+      <p className="ui-muted" style={{ marginTop: 0 }}>
+        This is additive to (not a replacement for) the dedicated Expense and Attendance &amp; Leave pages, and posts
+        through the exact same calls they do
+        {onGoToApprovals ? (
           <>
             {" "}
             (leave applications open a real approval on the{" "}
-            <button onClick={onGoToApprovals} style={{ padding: "0 4px" }}>
+            <button type="button" className="aifa-link-btn" onClick={onGoToApprovals}>
               Approvals
             </button>{" "}
             page).
@@ -74,25 +80,38 @@ export function CaptureRouterPage({ businessId, onGoToApprovals }: Props): JSX.E
         Forwarding something from WhatsApp or email instead? Use <strong>Forward to AiFA</strong> in the sidebar.
       </p>
 
-      <div className="card">
-        <textarea
-          value={core.rawText}
-          onChange={(e) => core.setRawText(e.target.value)}
-          placeholder='e.g. "Paid RM45 to Grab for petrol" or "Ahmad applying annual leave 2026-09-10 to 2026-09-12"'
-          rows={3}
-          style={{ width: "100%", padding: 8, boxSizing: "border-box" }}
-        />
-        <div className="row" style={{ marginTop: 8 }}>
-          <button onClick={() => core.handleDetect(buildIntake())} disabled={!core.rawText.trim()}>
+      <Card>
+        <Field label="What happened?">
+          {(p) => (
+            <textarea
+              {...p}
+              className="ui-textarea"
+              value={core.rawText}
+              onChange={(e) => core.setRawText(e.target.value)}
+              placeholder='e.g. "Paid RM45 to Grab for petrol" or "Ahmad applying annual leave 2026-09-10 to 2026-09-12"'
+              rows={3}
+            />
+          )}
+        </Field>
+        <div className="ui-form-actions">
+          <Button variant="primary" onClick={() => core.handleDetect(buildIntake())} disabled={!core.rawText.trim()}>
             Detect
-          </button>
+          </Button>
         </div>
 
         <CaptureResolveForm core={core} buildIntake={buildIntake} />
 
-        {core.error && <p className="error">{core.error}</p>}
-        {core.successMessage && <p className="success">{core.successMessage}</p>}
-      </div>
+        {core.error && (
+          <p className="aifa-alert aifa-alert--danger" role="alert">
+            {core.error}
+          </p>
+        )}
+        {core.successMessage && (
+          <p className="aifa-alert aifa-alert--success" role="status">
+            {core.successMessage}
+          </p>
+        )}
+      </Card>
 
       <CaptureTriageList core={core} />
     </div>

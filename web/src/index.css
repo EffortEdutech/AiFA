@@ -432,6 +432,7 @@ body {
 .aifa-alert { margin: 0; padding: 10px 12px; border-radius: var(--aifa-radius-sm); font-size: var(--aifa-font-size-sm); }
 .aifa-alert--danger { background: var(--aifa-danger-bg); color: var(--aifa-danger); }
 .aifa-alert--info { background: var(--aifa-info-bg); color: var(--aifa-info); }
+.aifa-alert--success { background: var(--aifa-success-bg); color: var(--aifa-success); }
 .aifa-alert--warning { background: var(--aifa-warning-bg); color: var(--aifa-warning); }
 
 .aifa-link-btn {

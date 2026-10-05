@@ -31,12 +31,16 @@
  *   speech-to-text vendor is chosen.
  * None of this is silently faked: every one of these paths shows its own
  * honest status rather than pretending to have worked.
+ *
+ * UI polish Phase 4: presentation only — shared header, card, labelled
+ * fields and buttons, a keyboard-reachable drop zone. Same handlers.
  */
 import { useRef, useState } from "react";
 
 import { createTextChannelIntake } from "@aifa/core/ai/channelIntake";
 import type { InputChannel } from "@aifa/core/ai/channelIntake";
 
+import { Button, Card, Field, PageHeader } from "../../ui";
 import { useCaptureRouterCore } from "../captureRouter/useCaptureRouterCore";
 import { CaptureResolveForm } from "../captureRouter/CaptureResolveForm";
 import { CaptureTriageList } from "../captureRouter/CaptureTriageList";
@@ -109,24 +113,27 @@ export function ForwardToAifaPage({ businessId, onGoToApprovals }: Props): JSX.E
   if (core.loadError) {
     return (
       <div className="aifa-page">
-        <h1>Forward to AiFA</h1>
-        <p className="error">{core.loadError}</p>
+        <PageHeader title="Forward to AiFA" />
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {core.loadError}
+        </p>
       </div>
     );
   }
 
   return (
     <div className="aifa-page">
-      <h1>Forward to AiFA</h1>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Got something business-relevant on WhatsApp or email? Paste the forwarded text, drop a receipt/invoice
-        image or PDF, or upload a voice note below — this goes through the exact same AI classification and
-        posting as <strong>Quick Capture (AI)</strong>
+      <PageHeader
+        title="Forward to AiFA"
+        description="Got something business-relevant on WhatsApp or email? Paste the forwarded text, drop a receipt/invoice image or PDF, or upload a voice note."
+      />
+      <p className="ui-muted" style={{ marginTop: 0 }}>
+        This goes through the exact same AI classification and posting as <strong>Quick Capture (AI)</strong>
         {onGoToApprovals ? (
           <>
             {" "}
             (leave applications open a real approval on the{" "}
-            <button onClick={onGoToApprovals} style={{ padding: "0 4px" }}>
+            <button type="button" className="aifa-link-btn" onClick={onGoToApprovals}>
               Approvals
             </button>{" "}
             page)
@@ -135,33 +142,43 @@ export function ForwardToAifaPage({ businessId, onGoToApprovals }: Props): JSX.E
         . Nothing here ever comes from an unattended inbox — only what you personally choose to paste/drop in.
       </p>
 
-      <div className="card">
-        <div className="row" style={{ marginBottom: 8 }}>
-          <label>
-            Where did this come from?{" "}
-            <select
-              value={sourceChannel}
-              onChange={(e) => setSourceChannel(e.target.value as InputChannel)}
-              style={{ padding: 6 }}
-            >
-              {FORWARD_SOURCES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </label>
+      <Card>
+        <div className="ui-form-grid">
+          <Field label="Where did this come from?">
+            {(p) => (
+              <select
+                {...p}
+                className="ui-select"
+                value={sourceChannel}
+                onChange={(e) => setSourceChannel(e.target.value as InputChannel)}
+              >
+                {FORWARD_SOURCES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
         </div>
 
-        <textarea
-          value={core.rawText}
-          onChange={(e) => core.setRawText(e.target.value)}
-          placeholder="Paste the forwarded message text here…"
-          rows={4}
-          style={{ width: "100%", padding: 8, boxSizing: "border-box" }}
-        />
+        <div style={{ marginTop: "var(--aifa-space-4)" }}>
+          <Field label="Forwarded message text">
+            {(p) => (
+              <textarea
+                {...p}
+                className="ui-textarea"
+                value={core.rawText}
+                onChange={(e) => core.setRawText(e.target.value)}
+                placeholder="Paste the forwarded message text here…"
+                rows={4}
+              />
+            )}
+          </Field>
+        </div>
 
         <div
+          className={`ui-dropzone${dragOver ? " is-over" : ""}`}
           onDragOver={(e) => {
             e.preventDefault();
             setDragOver(true);
@@ -173,23 +190,14 @@ export function ForwardToAifaPage({ businessId, onGoToApprovals }: Props): JSX.E
             const file = e.dataTransfer.files?.[0];
             if (file) handleFile(file);
           }}
-          className="muted"
-          style={{
-            marginTop: 8,
-            padding: 16,
-            border: "1px dashed var(--border-color, #999)",
-            borderRadius: 6,
-            textAlign: "center",
-            opacity: dragOver ? 0.6 : 1,
-          }}
         >
-          Drop a forwarded receipt/invoice image or PDF here, or{" "}
-          <label style={{ textDecoration: "underline", cursor: "pointer" }}>
+          <span>Drop a forwarded receipt/invoice image or PDF here, or </span>
+          <label className="ui-dropzone__browse">
             browse
             <input
               type="file"
+              className="ui-visually-hidden"
               accept="image/*,application/pdf"
-              style={{ display: "none" }}
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) handleFile(file);
@@ -197,57 +205,77 @@ export function ForwardToAifaPage({ businessId, onGoToApprovals }: Props): JSX.E
               }}
             />
           </label>
-          .
-          {core.mediaStatus === "extracting" && <div>Reading the file…</div>}
+          <span>.</span>
+          {core.mediaStatus === "extracting" && (
+            <div role="status" className="ui-note">
+              Reading the file…
+            </div>
+          )}
           {core.mediaStatus === "failed" && (
-            <div className="error" style={{ marginTop: 4 }}>
+            <p className="aifa-alert aifa-alert--danger" role="alert" style={{ textAlign: "left" }}>
               Couldn't read this file — a vision-capable connection isn't available yet on web (this needs the AI
               Gateway's image-support route, still being built). Paste a text description above instead for now.
-            </div>
+            </p>
           )}
         </div>
 
-        <div className="row" style={{ marginTop: 8, alignItems: "center", gap: 8 }}>
-          <label className="muted">
-            Voice note:{" "}
-            <button type="button" onClick={() => voiceInputRef.current?.click()}>
-              Upload
-            </button>
-          </label>
+        <div className="ui-inline-actions" style={{ marginTop: "var(--aifa-space-3)" }}>
+          <span className="ui-muted">Voice note:</span>
+          <Button size="sm" variant="secondary" onClick={() => voiceInputRef.current?.click()}>
+            Upload
+          </Button>
           <input
             ref={voiceInputRef}
             type="file"
+            className="ui-visually-hidden"
             accept="audio/*"
-            style={{ display: "none" }}
+            aria-label="Upload a voice note"
+            tabIndex={-1}
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) handleVoiceFile(file);
               e.target.value = "";
             }}
           />
-          {core.voiceStatus === "transcribing" && <span className="muted">Transcribing…</span>}
+          {core.voiceStatus === "transcribing" && (
+            <span className="ui-muted" role="status">
+              Transcribing…
+            </span>
+          )}
           {core.voiceStatus === "not_configured" && (
-            <span className="muted">
+            <span className="ui-muted">
               Voice transcription isn't set up yet — no speech-to-text provider is configured. This is a real
               vendor decision still to be made, not a bug.
             </span>
           )}
-          {core.voiceStatus === "failed" && <span className="error">Couldn't transcribe this recording.</span>}
+          {core.voiceStatus === "failed" && (
+            <span className="aifa-alert aifa-alert--danger" role="alert">
+              Couldn't transcribe this recording.
+            </span>
+          )}
         </div>
 
-        <div className="row" style={{ marginTop: 8 }}>
-          <button onClick={() => core.handleDetect(buildIntake())} disabled={!core.rawText.trim()}>
+        <div className="ui-form-actions">
+          <Button variant="primary" onClick={() => core.handleDetect(buildIntake())} disabled={!core.rawText.trim()}>
             Detect
-          </button>
+          </Button>
         </div>
 
-        {core.mediaHint && <p className="muted" style={{ marginTop: 8 }}>{core.mediaHint}</p>}
+        {core.mediaHint && <p className="ui-note">{core.mediaHint}</p>}
 
         <CaptureResolveForm core={core} buildIntake={buildIntake} />
 
-        {core.error && <p className="error">{core.error}</p>}
-        {core.successMessage && <p className="success">{core.successMessage}</p>}
-      </div>
+        {core.error && (
+          <p className="aifa-alert aifa-alert--danger" role="alert">
+            {core.error}
+          </p>
+        )}
+        {core.successMessage && (
+          <p className="aifa-alert aifa-alert--success" role="status">
+            {core.successMessage}
+          </p>
+        )}
+      </Card>
 
       <CaptureTriageList core={core} />
     </div>
