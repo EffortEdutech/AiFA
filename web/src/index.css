@@ -21,34 +21,21 @@ body {
   color: #1a1a1a;
 }
 * { box-sizing: border-box; }
-button {
-  font: inherit;
-  cursor: pointer;
-  color: var(--aifa-text);
-  background: var(--aifa-form-gold);
-  border: 1px solid var(--aifa-border);
-  border-radius: 6px;
-  padding: 6px 12px;
-}
-button:hover { background: var(--aifa-form-gold-hover); }
-button:disabled { opacity: 0.55; cursor: default; }
+/* UI polish Phase 4 (final step): bare form elements are neutral now. The gold
+   treatment lives only on `.ui-btn--primary`; inputs/selects use `.ui-input`,
+   `.ui-select`, `.ui-textarea` (ui/ui.css). Nothing here styles controls by
+   element name any more. */
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--aifa-accent);
   outline-offset: 1px;
 }
-input, select, textarea {
-  font: inherit;
-  background: var(--aifa-form-gold);
-  color: var(--aifa-text);
-  border: 1px solid var(--aifa-border);
-  border-radius: 6px;
-  padding: 6px 8px;
-}
 input::placeholder, textarea::placeholder { color: var(--aifa-text-muted); opacity: 1; }
-input:disabled, select:disabled, textarea:disabled {
-  background: var(--aifa-form-gold-disabled);
-  color: var(--aifa-text-muted);
-}
+/* Legacy classes below (.card/.row/.muted/.error/.tabs) are only used by
+   components no live screen renders any more (OverviewPage, Dashboard,
+   CaptureForm, SettingsReadOnly, DomainSettingsCard); kept so those still render. */
 .card {
   background: #fff;
   border: 1px solid #e2e2e5;

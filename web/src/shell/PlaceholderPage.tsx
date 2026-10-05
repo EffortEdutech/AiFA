@@ -5,16 +5,16 @@
  * component already covers (Overview, Devices, Business Settings; see
  * sidebarConfig.ts's `status` field).
  */
+import { PageHeader } from "../ui";
 import type { SidebarItem } from "./sidebarConfig";
 
 export function PlaceholderPage({ item }: { item: SidebarItem }): JSX.Element {
   return (
     <div className="aifa-page">
-      <h1>{item.label}</h1>
-      <p className="muted">
-        Sprint {item.sprint} builds this page (see the Phase 4 sprint plan). No backend work is
-        needed — the RPCs this page will call already exist and are verified.
-      </p>
+      <PageHeader
+        title={item.label}
+        description={`Sprint ${item.sprint} builds this page (see the Phase 4 sprint plan). No backend work is needed — the RPCs this page will call already exist and are verified.`}
+      />
     </div>
   );
 }
