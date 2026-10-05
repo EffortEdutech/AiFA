@@ -23,6 +23,9 @@
  * solo owner needs to go approve themselves. This page's banners say
  * so explicitly, distinct from the team-mode "routes through Approvals"
  * messaging every other capture-then-approve flow this phase uses.
+ *
+ * UI polish Phase 4: presentation only — shared header, tables, labelled
+ * fields. Every disclosure note (manual entry, solo/team routing) is kept.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -38,6 +41,7 @@ import {
   listLeaveTypes,
   listLeaveApplications,
 } from "../../lib/attendanceLeaveCommission";
+import { Button, Card, DataTable, Field, PageHeader, StatusPill, formatDate, type Column } from "../../ui";
 import { useAccess } from "../AccessContext";
 import { TabStrip } from "../TabStrip";
 
@@ -236,247 +240,286 @@ export function AttendanceLeavePage({ businessId, onGoToApprovals }: Props): JSX
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Attendance &amp; Leave</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
+  const employeeSelect = (label: string, value: string, set: (v: string) => void): JSX.Element => (
+    <Field label={label}>
+      {(p) => (
+        <select {...p} className="ui-select" value={value} onChange={(e) => set(e.target.value)}>
+          <option value="">Select employee…</option>
+          {employees.map((e) => (
+            <option key={e.id} value={e.id}>
+              {e.displayName}
+            </option>
+          ))}
+        </select>
+      )}
+    </Field>
+  );
+
+  const leaveTypeSelect = (value: string, set: (v: string) => void): JSX.Element => (
+    <Field label="Leave type">
+      {(p) => (
+        <select {...p} className="ui-select" value={value} onChange={(e) => set(e.target.value)}>
+          <option value="">Select leave type…</option>
+          {leaveTypes.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+      )}
+    </Field>
+  );
+
+  const approvalsLink =
+    accessModel !== "solo" && onGoToApprovals ? (
+      <button type="button" className="aifa-link-btn" onClick={onGoToApprovals}>
+        Go to Approvals
+      </button>
+    ) : null;
+
+  const attendanceColumns: Column<AttendanceRecord>[] = [
+    { key: "emp", header: "Employee", render: (r) => employeeName(r.employeePartyId) },
+    { key: "type", header: "Clock", render: (r) => `Clock ${r.clockType}` },
+    { key: "at", header: "Recorded", render: (r) => r.recordedAt },
+    {
+      key: "gps",
+      header: "GPS",
+      render: (r) => (r.gpsLat !== null && r.gpsLng !== null ? `${r.gpsLat.toFixed(4)}, ${r.gpsLng.toFixed(4)}` : "no GPS captured"),
+    },
+    { key: "src", header: "Source", render: (r) => (r.source === "mobile_app" ? "mobile" : "manual entry") },
+  ];
+
+  const overtimeColumns: Column<OvertimeRecord>[] = [
+    { key: "emp", header: "Employee", render: (o) => employeeName(o.employeePartyId) },
+    { key: "date", header: "Date", render: (o) => formatDate(o.date) },
+    { key: "hours", header: "Hours", numeric: true, render: (o) => `${o.hours} hour(s)` },
+    { key: "status", header: "Status", render: (o) => <StatusPill status={o.status} /> },
+  ];
+
+  const leaveColumns: Column<LeaveApplication>[] = [
+    { key: "emp", header: "Employee", render: (a) => employeeName(a.employeePartyId) },
+    { key: "type", header: "Leave type", render: (a) => leaveTypeName(a.leaveTypeId) },
+    { key: "period", header: "Period", render: (a) => `${a.startDate} to ${a.endDate}` },
+    { key: "status", header: "Status", render: (a) => <StatusPill status={a.status} /> },
+  ];
+
+  const submitOn = (ok: boolean, busy: boolean, run: () => Promise<void>) => (e: React.FormEvent) => {
+    e.preventDefault();
+    if (ok && !busy) void run();
+  };
 
   return (
     <div className="aifa-page">
-      <h1>Attendance &amp; Leave</h1>
-      <TabStrip
-        tabs={[
-          { id: "attendance", label: "Attendance & Overtime" },
-          { id: "leave", label: "Leave" },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
+      <PageHeader title="Attendance & Leave">
+        <TabStrip
+          tabs={[
+            { id: "attendance", label: "Attendance & Overtime" },
+            { id: "leave", label: "Leave" },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
+
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
 
       {tab === "attendance" && (
         <>
-          <div className="card" style={{ marginBottom: 12 }}>
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>Record a clock-in/out (manual entry)</h2>
-            <p className="muted" style={{ marginTop: 0 }}>
-              This is a manual web entry, not a GPS-tagged mobile capture — the mobile app's own offline-capture
-              flow is unaffected and separately unverified by this sprint (open since Sprint 35).
-            </p>
-            <div className="row">
-              <select value={clockEmployeeId} onChange={(e) => setClockEmployeeId(e.target.value)} style={{ padding: 6, minWidth: 200 }}>
-                <option value="">Select employee…</option>
-                {employees.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.displayName}
-                  </option>
-                ))}
-              </select>
-              <select value={clockType} onChange={(e) => setClockType(e.target.value as ClockType)} style={{ padding: 6 }}>
-                {CLOCK_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    Clock {t}
-                  </option>
-                ))}
-              </select>
-              <input type="datetime-local" value={clockAt} onChange={(e) => setClockAt(e.target.value)} style={{ padding: 6 }} />
-              <button onClick={() => void handleClock()} disabled={clockBusy || !clockEmployeeId}>
-                {clockBusy ? "Recording…" : "Record"}
-              </button>
-            </div>
-            {employees.length === 0 && <p className="muted" style={{ marginTop: 4 }}>No party is tagged "employee" yet — add one on the Parties page first.</p>}
-            {clockError && <p className="error">{clockError}</p>}
-          </div>
-
-          <h2 style={{ fontSize: 14, marginTop: 16 }}>Recent attendance</h2>
-          {attendance === null ? (
-            <p className="muted">Loading…</p>
-          ) : attendance.length === 0 ? (
-            <p className="muted">No attendance recorded yet.</p>
-          ) : (
-            attendance.slice(0, 30).map((rec) => (
-              <div key={rec.id} className="card">
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <span>
-                    {employeeName(rec.employeePartyId)} — clock {rec.clockType}
-                  </span>
-                  <span className="muted">{rec.source === "mobile_app" ? "mobile" : "manual entry"}</span>
-                </div>
-                <p className="muted" style={{ margin: "4px 0" }}>
-                  {rec.recordedAt}
-                  {rec.gpsLat !== null && rec.gpsLng !== null ? ` · GPS ${rec.gpsLat.toFixed(4)}, ${rec.gpsLng.toFixed(4)}` : " · no GPS captured"}
-                </p>
+          <Card
+            title="Record a clock-in/out (manual entry)"
+            description="This is a manual web entry, not a GPS-tagged mobile capture — the mobile app's own offline-capture flow is unaffected and separately unverified by this sprint (open since Sprint 35)."
+          >
+            <form onSubmit={submitOn(!!clockEmployeeId, clockBusy, handleClock)}>
+              <div className="ui-form-grid">
+                {employeeSelect("Employee", clockEmployeeId, setClockEmployeeId)}
+                <Field label="Clock">
+                  {(p) => (
+                    <select {...p} className="ui-select" value={clockType} onChange={(e) => setClockType(e.target.value as ClockType)}>
+                      {CLOCK_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          Clock {t}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </Field>
+                <Field label="Date & time">
+                  {(p) => <input {...p} className="ui-input" type="datetime-local" value={clockAt} onChange={(e) => setClockAt(e.target.value)} />}
+                </Field>
               </div>
-            ))
-          )}
-
-          <div className="card" style={{ marginTop: 16 }}>
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>Derive overtime for a date</h2>
-            <div className="row">
-              <select value={otEmployeeId} onChange={(e) => setOtEmployeeId(e.target.value)} style={{ padding: 6, minWidth: 200 }}>
-                <option value="">Select employee…</option>
-                {employees.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.displayName}
-                  </option>
-                ))}
-              </select>
-              <input type="date" value={otDate} onChange={(e) => setOtDate(e.target.value)} style={{ padding: 6 }} />
-              <input placeholder="Scheduled hours (default 8)" value={otScheduledHours} onChange={(e) => setOtScheduledHours(e.target.value)} style={{ padding: 6, width: 200 }} />
-              <button onClick={() => void handleDeriveOvertime()} disabled={otBusy || !otEmployeeId || !otDate}>
-                {otBusy ? "Deriving…" : "Derive"}
-              </button>
-            </div>
-            <p className="muted" style={{ marginTop: 4 }}>
-              Pairs that day's in/out attendance records and drafts an OvertimeRecord if worked hours exceed the
-              scheduled hours. Overtime pay feeds directly into the next Payroll Run's gross pay.
-            </p>
-            <p className="muted" style={{ marginTop: 4 }}>
-              {accessModel === "solo"
-                ? "You're the sole approver — an OvertimeRecord you derive is approved automatically (solo_self_resolved), no separate review step."
-                : "A derived OvertimeRecord routes through the Approvals inbox before it feeds into payroll."}{" "}
-              {accessModel !== "solo" && onGoToApprovals && (
-                <button onClick={onGoToApprovals} style={{ padding: "0 4px" }}>
-                  Go to Approvals
-                </button>
+              <div className="ui-form-actions">
+                <Button type="submit" variant="primary" loading={clockBusy} disabled={!clockEmployeeId}>
+                  {clockBusy ? "Recording…" : "Record"}
+                </Button>
+              </div>
+              {employees.length === 0 && <p className="ui-muted">No party is tagged "employee" yet — add one on the Parties page first.</p>}
+              {clockError && (
+                <p className="aifa-alert aifa-alert--danger" role="alert">
+                  {clockError}
+                </p>
               )}
-            </p>
-            {otError && <p className="error">{otError}</p>}
-          </div>
+            </form>
+          </Card>
 
-          {overtime === null ? null : overtime.length === 0 ? null : (
-            <>
-              <h2 style={{ fontSize: 14, marginTop: 16 }}>Overtime records</h2>
-              {overtime.map((ot) => (
-                <div key={ot.id} className="card">
-                  <div className="row" style={{ justifyContent: "space-between" }}>
-                    <span>
-                      {employeeName(ot.employeePartyId)} — {ot.date}
-                    </span>
-                    <span className="muted">{ot.status}</span>
-                  </div>
-                  <p className="muted" style={{ margin: "4px 0" }}>{ot.hours} hour(s)</p>
-                </div>
-              ))}
-            </>
+          <Card title="Recent attendance" flush>
+            <DataTable
+              caption="Recent attendance"
+              columns={attendanceColumns}
+              rows={loadError ? [] : attendance === null ? null : attendance.slice(0, 30)}
+              rowKey={(r) => r.id}
+              empty={<div className="ui-table-state">No attendance recorded yet.</div>}
+            />
+          </Card>
+
+          <Card
+            title="Derive overtime for a date"
+            description="Pairs that day's in/out attendance records and drafts an OvertimeRecord if worked hours exceed the scheduled hours. Overtime pay feeds directly into the next Payroll Run's gross pay."
+          >
+            <form onSubmit={submitOn(!!otEmployeeId && !!otDate, otBusy, handleDeriveOvertime)}>
+              <div className="ui-form-grid">
+                {employeeSelect("Employee", otEmployeeId, setOtEmployeeId)}
+                <Field label="Date">
+                  {(p) => <input {...p} className="ui-input" type="date" value={otDate} onChange={(e) => setOtDate(e.target.value)} />}
+                </Field>
+                <Field label="Scheduled hours" hint="Default 8">
+                  {(p) => <input {...p} className="ui-input" value={otScheduledHours} onChange={(e) => setOtScheduledHours(e.target.value)} />}
+                </Field>
+              </div>
+              <div className="ui-form-actions">
+                <Button type="submit" variant="primary" loading={otBusy} disabled={!otEmployeeId || !otDate}>
+                  {otBusy ? "Deriving…" : "Derive"}
+                </Button>
+              </div>
+              <p className="ui-muted">
+                {accessModel === "solo"
+                  ? "You're the sole approver — an OvertimeRecord you derive is approved automatically (solo_self_resolved), no separate review step."
+                  : "A derived OvertimeRecord routes through the Approvals inbox before it feeds into payroll."}{" "}
+                {approvalsLink}
+              </p>
+              {otError && (
+                <p className="aifa-alert aifa-alert--danger" role="alert">
+                  {otError}
+                </p>
+              )}
+            </form>
+          </Card>
+
+          {overtime !== null && overtime.length > 0 && (
+            <Card title="Overtime records" flush>
+              <DataTable caption="Overtime records" columns={overtimeColumns} rows={overtime} rowKey={(o) => o.id} />
+            </Card>
           )}
         </>
       )}
 
       {tab === "leave" && (
         <>
-          <div className="card" style={{ marginBottom: 12 }}>
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>Leave types</h2>
-            <div className="row" style={{ flexWrap: "wrap", marginBottom: 8 }}>
-              {leaveTypes.map((t) => (
-                <span key={t.id} className="muted" style={{ padding: "2px 8px", border: "1px solid var(--aifa-border, #e2e2e2)", borderRadius: 4 }}>
-                  {t.name} ({t.defaultEntitlementDays}d)
-                </span>
-              ))}
-            </div>
-            <div className="row">
-              <input placeholder="Leave type name" value={newLeaveTypeName} onChange={(e) => setNewLeaveTypeName(e.target.value)} style={{ padding: 6, flex: 1 }} />
-              <input placeholder="Default entitlement (days)" value={newLeaveTypeDays} onChange={(e) => setNewLeaveTypeDays(e.target.value)} style={{ padding: 6, width: 200 }} />
-              <button onClick={() => void handleCreateLeaveType()} disabled={leaveTypeBusy || !newLeaveTypeName.trim() || !newLeaveTypeDays.trim()}>
-                {leaveTypeBusy ? "Creating…" : "Add leave type"}
-              </button>
-            </div>
-            <p className="muted" style={{ marginTop: 4 }}>Requires `configure` on `hr_attendance_leave` — only Owner/Payroll Admin hold that by default.</p>
-            {leaveTypeError && <p className="error">{leaveTypeError}</p>}
-          </div>
-
-          <div className="card" style={{ marginBottom: 12 }}>
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>Grant a leave balance</h2>
-            <div className="row">
-              <select value={grantEmployeeId} onChange={(e) => setGrantEmployeeId(e.target.value)} style={{ padding: 6, minWidth: 180 }}>
-                <option value="">Select employee…</option>
-                {employees.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.displayName}
-                  </option>
-                ))}
-              </select>
-              <select value={grantLeaveTypeId} onChange={(e) => setGrantLeaveTypeId(e.target.value)} style={{ padding: 6, minWidth: 160 }}>
-                <option value="">Select leave type…</option>
+          <Card title="Leave types" description="Requires `configure` on `hr_attendance_leave` — only Owner/Payroll Admin hold that by default.">
+            {leaveTypes.length > 0 && (
+              <div className="ui-inline-actions" style={{ marginBottom: 12 }}>
                 {leaveTypes.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-              <input placeholder="Year" value={grantYear} onChange={(e) => setGrantYear(e.target.value)} style={{ padding: 6, width: 100 }} />
-              <input placeholder="Entitled days (blank = type default)" value={grantDays} onChange={(e) => setGrantDays(e.target.value)} style={{ padding: 6, width: 220 }} />
-              <button onClick={() => void handleGrantBalance()} disabled={grantBusy || !grantEmployeeId || !grantLeaveTypeId || !grantYear.trim()}>
-                {grantBusy ? "Granting…" : "Grant"}
-              </button>
-            </div>
-            {grantError && <p className="error">{grantError}</p>}
-          </div>
-
-          <div className="card" style={{ marginBottom: 12 }}>
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>Apply for leave</h2>
-            <div className="row">
-              <select value={applyEmployeeId} onChange={(e) => setApplyEmployeeId(e.target.value)} style={{ padding: 6, minWidth: 180 }}>
-                <option value="">Select employee…</option>
-                {employees.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.displayName}
-                  </option>
-                ))}
-              </select>
-              <select value={applyLeaveTypeId} onChange={(e) => setApplyLeaveTypeId(e.target.value)} style={{ padding: 6, minWidth: 160 }}>
-                <option value="">Select leave type…</option>
-                {leaveTypes.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-              <input type="date" value={applyStartDate} onChange={(e) => setApplyStartDate(e.target.value)} style={{ padding: 6 }} />
-              <span className="muted">to</span>
-              <input type="date" value={applyEndDate} onChange={(e) => setApplyEndDate(e.target.value)} style={{ padding: 6 }} />
-              <button onClick={() => void handleApplyLeave()} disabled={applyBusy || !applyEmployeeId || !applyLeaveTypeId || !applyStartDate || !applyEndDate}>
-                {applyBusy ? "Submitting…" : "Apply"}
-              </button>
-            </div>
-            <p className="muted" style={{ marginTop: 4 }}>
-              {accessModel === "solo"
-                ? "You're the sole approver — a leave application you submit is approved automatically (solo_self_resolved), no separate review step."
-                : "A leave application routes through the Approvals inbox. Balance is only deducted once approved."}{" "}
-              {accessModel !== "solo" && onGoToApprovals && (
-                <button onClick={onGoToApprovals} style={{ padding: "0 4px" }}>
-                  Go to Approvals
-                </button>
-              )}
-            </p>
-            {applyError && <p className="error">{applyError}</p>}
-          </div>
-
-          <h2 style={{ fontSize: 14, marginTop: 16 }}>Leave applications</h2>
-          {leaveApplications === null ? (
-            <p className="muted">Loading…</p>
-          ) : leaveApplications.length === 0 ? (
-            <p className="muted">No leave applications yet.</p>
-          ) : (
-            leaveApplications.map((app) => (
-              <div key={app.id} className="card">
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <span>
-                    {employeeName(app.employeePartyId)} — {leaveTypeName(app.leaveTypeId)}
+                  <span key={t.id} className="ui-chip">
+                    {t.name} ({t.defaultEntitlementDays}d)
                   </span>
-                  <span
-                    className="muted"
-                    style={app.status === "approved" ? { color: "#1b7a3d", fontWeight: 600 } : app.status === "rejected" ? { color: "#c0392b" } : undefined}
-                  >
-                    {app.status}
-                  </span>
-                </div>
-                <p className="muted" style={{ margin: "4px 0" }}>{app.startDate} to {app.endDate}</p>
+                ))}
               </div>
-            ))
-          )}
+            )}
+            <form onSubmit={submitOn(!!newLeaveTypeName.trim() && !!newLeaveTypeDays.trim(), leaveTypeBusy, handleCreateLeaveType)}>
+              <div className="ui-form-grid">
+                <Field label="Leave type name">
+                  {(p) => <input {...p} className="ui-input" value={newLeaveTypeName} onChange={(e) => setNewLeaveTypeName(e.target.value)} />}
+                </Field>
+                <Field label="Default entitlement (days)">
+                  {(p) => <input {...p} className="ui-input" value={newLeaveTypeDays} onChange={(e) => setNewLeaveTypeDays(e.target.value)} />}
+                </Field>
+              </div>
+              <div className="ui-form-actions">
+                <Button type="submit" variant="primary" loading={leaveTypeBusy} disabled={!newLeaveTypeName.trim() || !newLeaveTypeDays.trim()}>
+                  {leaveTypeBusy ? "Creating…" : "Add leave type"}
+                </Button>
+              </div>
+              {leaveTypeError && (
+                <p className="aifa-alert aifa-alert--danger" role="alert">
+                  {leaveTypeError}
+                </p>
+              )}
+            </form>
+          </Card>
+
+          <Card title="Grant a leave balance">
+            <form onSubmit={submitOn(!!grantEmployeeId && !!grantLeaveTypeId && !!grantYear.trim(), grantBusy, handleGrantBalance)}>
+              <div className="ui-form-grid">
+                {employeeSelect("Employee", grantEmployeeId, setGrantEmployeeId)}
+                {leaveTypeSelect(grantLeaveTypeId, setGrantLeaveTypeId)}
+                <Field label="Year">
+                  {(p) => <input {...p} className="ui-input" value={grantYear} onChange={(e) => setGrantYear(e.target.value)} />}
+                </Field>
+                <Field label="Entitled days" hint="Blank = type default">
+                  {(p) => <input {...p} className="ui-input" value={grantDays} onChange={(e) => setGrantDays(e.target.value)} />}
+                </Field>
+              </div>
+              <div className="ui-form-actions">
+                <Button type="submit" variant="primary" loading={grantBusy} disabled={!grantEmployeeId || !grantLeaveTypeId || !grantYear.trim()}>
+                  {grantBusy ? "Granting…" : "Grant"}
+                </Button>
+              </div>
+              {grantError && (
+                <p className="aifa-alert aifa-alert--danger" role="alert">
+                  {grantError}
+                </p>
+              )}
+            </form>
+          </Card>
+
+          <Card title="Apply for leave">
+            <form onSubmit={submitOn(!!applyEmployeeId && !!applyLeaveTypeId && !!applyStartDate && !!applyEndDate, applyBusy, handleApplyLeave)}>
+              <div className="ui-form-grid">
+                {employeeSelect("Employee", applyEmployeeId, setApplyEmployeeId)}
+                {leaveTypeSelect(applyLeaveTypeId, setApplyLeaveTypeId)}
+                <Field label="From">
+                  {(p) => <input {...p} className="ui-input" type="date" value={applyStartDate} onChange={(e) => setApplyStartDate(e.target.value)} />}
+                </Field>
+                <Field label="To">
+                  {(p) => <input {...p} className="ui-input" type="date" value={applyEndDate} onChange={(e) => setApplyEndDate(e.target.value)} />}
+                </Field>
+              </div>
+              <div className="ui-form-actions">
+                <Button
+                  type="submit"
+                  variant="primary"
+                  loading={applyBusy}
+                  disabled={!applyEmployeeId || !applyLeaveTypeId || !applyStartDate || !applyEndDate}
+                >
+                  {applyBusy ? "Submitting…" : "Apply"}
+                </Button>
+              </div>
+              <p className="ui-muted">
+                {accessModel === "solo"
+                  ? "You're the sole approver — a leave application you submit is approved automatically (solo_self_resolved), no separate review step."
+                  : "A leave application routes through the Approvals inbox. Balance is only deducted once approved."}{" "}
+                {approvalsLink}
+              </p>
+              {applyError && (
+                <p className="aifa-alert aifa-alert--danger" role="alert">
+                  {applyError}
+                </p>
+              )}
+            </form>
+          </Card>
+
+          <Card title="Leave applications" flush>
+            <DataTable
+              caption="Leave applications"
+              columns={leaveColumns}
+              rows={loadError ? [] : leaveApplications}
+              rowKey={(a) => a.id}
+              empty={<div className="ui-table-state">No leave applications yet.</div>}
+            />
+          </Card>
         </>
       )}
     </div>

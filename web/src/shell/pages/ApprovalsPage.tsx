@@ -19,6 +19,9 @@
  * when the caller holds `configure` on `settings`
  * (`getGrantedCapabilitiesForDomain`, same pattern as every other
  * Sprint 45-48 gated action) — solo/null-membership unrestricted.
+ *
+ * UI polish Phase 4: presentation only — shared header, table and labelled
+ * fields. Same calls, gating and confirmations.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -29,6 +32,7 @@ import type { BusinessMembership } from "@aifa/core/sync/teamMembershipTransport
 import { supabase } from "../../lib/supabaseClient";
 import { listApprovalTasks, listApprovalDelegations } from "../../lib/approvals";
 import { listMemberships, getGrantedCapabilitiesForDomain } from "../../lib/membership";
+import { Button, Card, DataTable, Field, PageHeader, StatusPill, formatMoney, type Column } from "../../ui";
 import { useAccess } from "../AccessContext";
 import { TabStrip } from "../TabStrip";
 
@@ -177,15 +181,6 @@ export function ApprovalsPage({ businessId }: Props): JSX.Element {
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Approvals</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
-
   const myId = myMembership?.id ?? null;
   const filtered = (tasks ?? []).filter((t) => {
     if (tab === "my-pending") return t.status === "pending_approval" && t.assignedMembershipId === myId;
@@ -198,164 +193,215 @@ export function ApprovalsPage({ businessId }: Props): JSX.Element {
   const myDelegationsReceived = (delegations ?? []).filter(
     (d) => d.status === "active" && d.delegateMembershipId === myId,
   );
+  const myDelegationsCreated = (delegations ?? []).filter((d) => d.delegatorMembershipId === myId);
+
+  const taskColumns: Column<ApprovalTask>[] = [
+    {
+      key: "subject",
+      header: "Request",
+      render: (t) => (
+        <>
+          <strong>{describeSubject(t)}</strong>
+          {t.aiDraftSummary && <div className="ui-cell-sub">{t.aiDraftSummary}</div>}
+          {t.nextAction && <div className="ui-cell-sub">{t.nextAction}</div>}
+        </>
+      ),
+    },
+    { key: "domain", header: "Domain", render: (t) => t.domain },
+    { key: "amount", header: "Amount", numeric: true, render: (t) => (t.amount != null ? formatMoney(t.amount) : "—") },
+    { key: "via", header: "Via", render: (t) => t.resolvedVia },
+    { key: "status", header: "Status", render: (t) => <StatusPill status={t.status} /> },
+    {
+      key: "actions",
+      header: "",
+      render: (t) => {
+        const canDecide =
+          t.status === "pending_approval" && (t.assignedMembershipId === myId || t.assignedMembershipId === null);
+        if (!canDecide) return null;
+        const busy = busyTaskId === t.id;
+        return (
+          <div className="ui-inline-actions">
+            <Button size="sm" variant="primary" disabled={busy} onClick={() => void handleDecide(t.id, "approved")}>
+              Approve
+            </Button>
+            <Button size="sm" variant="danger" disabled={busy} onClick={() => void handleDecide(t.id, "rejected")}>
+              Reject
+            </Button>
+          </div>
+        );
+      },
+    },
+  ];
+
+  const receivedColumns: Column<ApprovalDelegation>[] = [
+    { key: "scope", header: "Scope", render: (d) => d.domainScope ?? "All domains" },
+    { key: "from", header: "From", render: (d) => `Member #${d.delegatorMembershipId.slice(0, 8)}` },
+    { key: "reason", header: "Reason", render: (d) => d.reason ?? "—" },
+    {
+      key: "actions",
+      header: "",
+      render: (d) => (
+        <Button size="sm" variant="secondary" onClick={() => void handleRevokeDelegation(d.id)}>
+          Revoke
+        </Button>
+      ),
+    },
+  ];
+
+  const createdColumns: Column<ApprovalDelegation>[] = [
+    { key: "scope", header: "Scope", render: (d) => d.domainScope ?? "All domains" },
+    { key: "to", header: "To", render: (d) => `Member #${d.delegateMembershipId.slice(0, 8)}` },
+    { key: "status", header: "Status", render: (d) => <StatusPill status={d.status} /> },
+    { key: "reason", header: "Reason", render: (d) => d.reason ?? "—" },
+    {
+      key: "actions",
+      header: "",
+      render: (d) =>
+        d.status === "active" ? (
+          <Button size="sm" variant="secondary" onClick={() => void handleRevokeDelegation(d.id)}>
+            Revoke
+          </Button>
+        ) : null,
+    },
+  ];
 
   return (
     <div className="aifa-page">
-      <h1>Approvals</h1>
-      <TabStrip
-        tabs={[
-          { id: "my-pending", label: "My Pending", count: tasks?.filter((t) => t.status === "pending_approval" && t.assignedMembershipId === myId).length },
-          { id: "delegated-to-me", label: "Delegated to Me", count: myDelegationsReceived.length || undefined },
-          { id: "all", label: "All" },
-          { id: "history", label: "History" },
-          { id: "my-delegations", label: "My Delegations" },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
+      <PageHeader title="Approvals">
+        <TabStrip
+          tabs={[
+            { id: "my-pending", label: "My Pending", count: tasks?.filter((t) => t.status === "pending_approval" && t.assignedMembershipId === myId).length },
+            { id: "delegated-to-me", label: "Delegated to Me", count: myDelegationsReceived.length || undefined },
+            { id: "all", label: "All" },
+            { id: "history", label: "History" },
+            { id: "my-delegations", label: "My Delegations" },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
 
-      {tab === "my-delegations" ? null : tasks === null ? (
-        <p className="muted">Loading…</p>
-      ) : filtered.length === 0 ? (
-        <p className="muted">Nothing here.</p>
-      ) : (
-        filtered.map((task) => {
-          const busy = busyTaskId === task.id;
-          const canDecide =
-            task.status === "pending_approval" && (task.assignedMembershipId === myId || task.assignedMembershipId === null);
-          return (
-            <div key={task.id} className="card">
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <strong>{describeSubject(task)}</strong>
-                <span className="muted">{task.status}</span>
-              </div>
-              <p className="muted" style={{ margin: "4px 0" }}>
-                Domain: {task.domain}
-                {task.amount != null && ` · RM${task.amount.toFixed(2)}`} · via {task.resolvedVia}
-              </p>
-              {task.aiDraftSummary && <p style={{ margin: "4px 0" }}>{task.aiDraftSummary}</p>}
-              {task.nextAction && <p className="muted" style={{ margin: "4px 0" }}>{task.nextAction}</p>}
-              {canDecide && (
-                <div className="row" style={{ marginTop: 4 }}>
-                  <button onClick={() => void handleDecide(task.id, "approved")} disabled={busy}>
-                    Approve
-                  </button>
-                  <button
-                    onClick={() => void handleDecide(task.id, "rejected")}
-                    disabled={busy}
-                    style={{ color: "#c0392b", borderColor: "#c0392b" }}
-                  >
-                    Reject
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
+      {actionError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {actionError}
+        </p>
+      )}
+
+      {tab !== "my-delegations" && (
+        <Card flush>
+          <DataTable
+            caption="Approval tasks"
+            columns={taskColumns}
+            rows={loadError ? [] : tasks === null ? null : filtered}
+            rowKey={(t) => t.id}
+            empty={<div className="ui-table-state">Nothing here.</div>}
+          />
+        </Card>
       )}
 
       {tab === "delegated-to-me" && (
-        <div className="card">
-          <h2 style={{ fontSize: 14, marginTop: 0 }}>Active delegations to you</h2>
-          {myDelegationsReceived.length === 0 ? (
-            <p className="muted">No active delegation right now.</p>
-          ) : (
-            myDelegationsReceived.map((d) => (
-              <p key={d.id} className="muted" style={{ margin: "4px 0" }}>
-                {d.domainScope ?? "All domains"} · from Member #{d.delegatorMembershipId.slice(0, 8)}
-                {d.reason ? ` — ${d.reason}` : ""}
-                {" · "}
-                <button onClick={() => void handleRevokeDelegation(d.id)} style={{ padding: "0 4px" }}>
-                  Revoke
-                </button>
-              </p>
-            ))
-          )}
-        </div>
+        <Card title="Active delegations to you" flush>
+          <DataTable
+            caption="Active delegations to you"
+            columns={receivedColumns}
+            rows={loadError ? [] : delegations === null ? null : myDelegationsReceived}
+            rowKey={(d) => d.id}
+            empty={<div className="ui-table-state">No active delegation right now.</div>}
+          />
+        </Card>
       )}
 
       {tab === "my-delegations" && (
         <>
-          <div className="card">
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>Create a delegation</h2>
-            {canDelegateOthers && (
-              <div style={{ marginBottom: 8 }}>
-                <label className="muted">
-                  On behalf of{" "}
-                  <select value={delegatorMembershipId} onChange={(e) => setDelegatorMembershipId(e.target.value)} style={{ padding: 4 }}>
-                    {memberships.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.id === myId ? "Me" : `Member #${m.id.slice(0, 8)}`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <p className="muted" style={{ fontSize: 12, margin: "2px 0" }}>
-                  Delegating someone else's authority requires `settings: configure` — you have it, so this picker is
-                  available. Without it, you can only delegate your own.
-                </p>
-              </div>
-            )}
-            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-              <select value={delegateMembershipId} onChange={(e) => setDelegateMembershipId(e.target.value)} style={{ padding: 6 }}>
-                <option value="">Delegate to…</option>
-                {memberships
-                  .filter((m) => m.id !== delegatorMembershipId)
-                  .map((m) => (
-                    <option key={m.id} value={m.id}>
-                      Member #{m.id.slice(0, 8)}
-                    </option>
-                  ))}
-              </select>
-              <select value={domainScope} onChange={(e) => setDomainScope(e.target.value as Domain | "")} style={{ padding: 6 }}>
-                <option value="">All domains</option>
-                {DOMAIN_OPTIONS.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-              <input type="date" placeholder="Ends (optional)" value={delegationEndsAt} onChange={(e) => setDelegationEndsAt(e.target.value)} style={{ padding: 6 }} />
-              <input placeholder="Reason (optional)" value={delegationReason} onChange={(e) => setDelegationReason(e.target.value)} style={{ padding: 6, minWidth: 200 }} />
-              <button onClick={() => void handleCreateDelegation()} disabled={createDelegationBusy || !delegateMembershipId}>
-                {createDelegationBusy ? "Creating…" : "Create Delegation"}
-              </button>
-            </div>
-            <p className="muted" style={{ marginTop: 6 }}>
-              A domain-scoped delegation only narrows what the delegate can approve — it never grants authority the
-              delegator does not already hold (Vol 13_1 §5). Every affected still-pending task is re-resolved
-              immediately.
-            </p>
-            {createDelegationError && <p className="error">{createDelegationError}</p>}
-          </div>
-
-          <div className="card">
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>Delegations you've created</h2>
-            {(delegations ?? []).filter((d) => d.delegatorMembershipId === myId).length === 0 ? (
-              <p className="muted">None yet.</p>
-            ) : (
-              (delegations ?? [])
-                .filter((d) => d.delegatorMembershipId === myId)
-                .map((d) => (
-                  <p key={d.id} className="muted" style={{ margin: "4px 0" }}>
-                    {d.domainScope ?? "All domains"} · to Member #{d.delegateMembershipId.slice(0, 8)} · {d.status}
-                    {d.reason ? ` — ${d.reason}` : ""}
-                    {d.status === "active" && (
-                      <>
-                        {" · "}
-                        <button onClick={() => void handleRevokeDelegation(d.id)} style={{ padding: "0 4px" }}>
-                          Revoke
-                        </button>
-                      </>
+          <Card
+            title="Create a delegation"
+            description="A domain-scoped delegation only narrows what the delegate can approve — it never grants authority the delegator does not already hold (Vol 13_1 §5). Every affected still-pending task is re-resolved immediately."
+          >
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!createDelegationBusy && delegateMembershipId) void handleCreateDelegation();
+              }}
+            >
+              <div className="ui-form-grid">
+                {canDelegateOthers && (
+                  <Field
+                    label="On behalf of"
+                    hint="Delegating someone else's authority requires `settings: configure` — you have it, so this picker is available. Without it, you can only delegate your own."
+                  >
+                    {(p) => (
+                      <select {...p} className="ui-select" value={delegatorMembershipId} onChange={(e) => setDelegatorMembershipId(e.target.value)}>
+                        {memberships.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.id === myId ? "Me" : `Member #${m.id.slice(0, 8)}`}
+                          </option>
+                        ))}
+                      </select>
                     )}
-                  </p>
-                ))
-            )}
-          </div>
+                  </Field>
+                )}
+                <Field label="Delegate to">
+                  {(p) => (
+                    <select {...p} className="ui-select" value={delegateMembershipId} onChange={(e) => setDelegateMembershipId(e.target.value)}>
+                      <option value="">Delegate to…</option>
+                      {memberships
+                        .filter((m) => m.id !== delegatorMembershipId)
+                        .map((m) => (
+                          <option key={m.id} value={m.id}>
+                            Member #{m.id.slice(0, 8)}
+                          </option>
+                        ))}
+                    </select>
+                  )}
+                </Field>
+                <Field label="Domain">
+                  {(p) => (
+                    <select {...p} className="ui-select" value={domainScope} onChange={(e) => setDomainScope(e.target.value as Domain | "")}>
+                      <option value="">All domains</option>
+                      {DOMAIN_OPTIONS.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </Field>
+                <Field label="Ends (optional)">
+                  {(p) => <input {...p} className="ui-input" type="date" value={delegationEndsAt} onChange={(e) => setDelegationEndsAt(e.target.value)} />}
+                </Field>
+                <Field label="Reason (optional)">
+                  {(p) => <input {...p} className="ui-input" value={delegationReason} onChange={(e) => setDelegationReason(e.target.value)} />}
+                </Field>
+              </div>
+              <div className="ui-form-actions">
+                <Button type="submit" variant="primary" loading={createDelegationBusy} disabled={!delegateMembershipId}>
+                  {createDelegationBusy ? "Creating…" : "Create Delegation"}
+                </Button>
+              </div>
+              {createDelegationError && (
+                <p className="aifa-alert aifa-alert--danger" role="alert">
+                  {createDelegationError}
+                </p>
+              )}
+            </form>
+          </Card>
+
+          <Card title="Delegations you've created" flush>
+            <DataTable
+              caption="Delegations you've created"
+              columns={createdColumns}
+              rows={loadError ? [] : delegations === null ? null : myDelegationsCreated}
+              rowKey={(d) => d.id}
+              empty={<div className="ui-table-state">None yet.</div>}
+            />
+          </Card>
         </>
       )}
-
-      {actionError && <p className="error">{actionError}</p>}
     </div>
   );
 }

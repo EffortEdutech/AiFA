@@ -7,6 +7,9 @@
  * membership row (see lib/membership.ts's own header for why that's
  * safe and correct: the write RPCs are separately, server-side gated on
  * `configure` on `settings`, Vol 13_1 §4).
+ *
+ * UI polish Phase 4: presentation only — shared header, table and labelled
+ * fields. Same calls, gating and confirmations.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -22,6 +25,7 @@ import {
   setMyDisplayName,
   type RoleSummary,
 } from "../../lib/membership";
+import { Button, Card, DataTable, Field, PageHeader, StatusPill, formatMoney, type Column } from "../../ui";
 import { useAccess } from "../AccessContext";
 
 const teamMembershipTransport = createSupabaseTeamMembershipTransport(supabase);
@@ -183,139 +187,190 @@ export function MembersPage({ businessId }: Props): JSX.Element {
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Members & Roles</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
-
   // Vol 12_2 §4.2's own table: a non-Owner sees only their own row.
   const visibleMembers =
     isOwner || !membershipChecked
       ? members
       : members?.filter((m) => myMembership && m.id === myMembership.id) ?? null;
 
-  return (
-    <div className="aifa-page">
-      <h1>Members & Roles</h1>
-      <p className="muted">
-        This business is currently in <strong>{accessModel}</strong> mode (Vol 13_3 §2 —
-        automatically becomes &quot;team&quot; once a second active member exists).
-      </p>
-
-      <div className="card">
-        <h2 style={{ fontSize: 16, marginTop: 0 }}>Your display name</h2>
-        <p className="muted" style={{ margin: "0 0 8px" }}>
-          Shown to teammates in this list, and used to address you by name wherever AiFA refers to who's who.
-        </p>
-        <div className="row">
-          <input
-            type="text"
-            placeholder="Your name"
-            value={myNameDraft}
-            onChange={(e) => setMyNameDraft(e.target.value)}
-            style={{ padding: 6, flex: 1, minWidth: 220 }}
-          />
-          <button onClick={() => void handleSaveMyName()} disabled={myNameBusy || !myNameDraft.trim()}>
-            {myNameBusy ? "Saving…" : "Save"}
-          </button>
-        </div>
-        {myNameError && <p className="error">{myNameError}</p>}
-      </div>
-
-      {isOwner && (
-        <div className="card">
-          <h2 style={{ fontSize: 16, marginTop: 0 }}>Invite a member</h2>
-          <div className="row">
-            <input
-              type="email"
-              placeholder="email@example.com"
-              value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
-              style={{ padding: 6, flex: 1, minWidth: 220 }}
-            />
-            <select value={inviteRoleId} onChange={(e) => setInviteRoleId(e.target.value)} style={{ padding: 6 }}>
-              {roles?.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-            <button onClick={() => void handleInvite()} disabled={inviteBusy || !inviteEmail.trim()}>
-              {inviteBusy ? "Sending…" : "Send invite"}
-            </button>
-          </div>
-          {inviteError && <p className="error">{inviteError}</p>}
-        </div>
-      )}
-
-      {visibleMembers === null ? (
-        <p className="muted">Loading…</p>
-      ) : (
-        visibleMembers.map((m) => {
-          const isSelf = myMembership?.id === m.id;
-          const busy = actionBusyId === m.id;
-          return (
-            <div key={m.id} className="card">
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <strong>
-                  {resolvedName(m)}
-                  {isSelf ? " (you)" : ""}
-                </strong>
-                <span className="muted">{m.status}</span>
-              </div>
-              <p className="muted" style={{ margin: "4px 0" }}>
-                Role: {roleName(m.roleId)}
-                {m.approvalLimitMyr != null && ` · Approval limit RM${m.approvalLimitMyr.toFixed(2)}`}
-              </p>
-              {isOwner && editingLabelId === m.id && (
-                <div className="row" style={{ margin: "4px 0" }}>
-                  <input
-                    type="text"
-                    placeholder="Label shown to the whole team (blank clears it)"
-                    value={labelDraft}
-                    onChange={(e) => setLabelDraft(e.target.value)}
-                    style={{ padding: 6, flex: 1, minWidth: 220 }}
-                    autoFocus
-                  />
-                  <button onClick={() => void handleSaveLabel(m)} disabled={labelBusyId === m.id}>
-                    {labelBusyId === m.id ? "Saving…" : "Save"}
-                  </button>
-                  <button onClick={cancelEditingLabel} disabled={labelBusyId === m.id}>
-                    Cancel
-                  </button>
-                </div>
-              )}
-              {isOwner && m.status !== "removed" && (
-                <div className="row" style={{ marginTop: 4 }}>
+  const columns: Column<BusinessMembership>[] = [
+    {
+      key: "member",
+      header: "Member",
+      render: (m) => (
+        <strong>
+          {resolvedName(m)}
+          {myMembership?.id === m.id ? " (you)" : ""}
+        </strong>
+      ),
+    },
+    { key: "status", header: "Status", render: (m) => <StatusPill status={m.status} /> },
+    {
+      key: "role",
+      header: "Role",
+      render: (m) => (
+        <>
+          {roleName(m.roleId)}
+          {m.approvalLimitMyr != null && <div className="ui-cell-sub">Approval limit {formatMoney(m.approvalLimitMyr)}</div>}
+        </>
+      ),
+    },
+    ...(isOwner
+      ? [
+          {
+            key: "actions",
+            header: "",
+            render: (m: BusinessMembership) => {
+              if (m.status === "removed") return null;
+              const isSelf = myMembership?.id === m.id;
+              const busy = actionBusyId === m.id;
+              return (
+                <div className="ui-inline-actions">
                   {editingLabelId !== m.id && (
-                    <button onClick={() => startEditingLabel(m)}>Set label</button>
+                    <Button size="sm" variant="secondary" onClick={() => startEditingLabel(m)}>
+                      Set label
+                    </Button>
                   )}
                   {!isSelf && m.status === "active" && (
-                    <button onClick={() => void handleSuspend(m)} disabled={busy}>
+                    <Button size="sm" variant="secondary" disabled={busy} onClick={() => void handleSuspend(m)}>
                       Suspend
-                    </button>
+                    </Button>
                   )}
                   {!isSelf && (
-                    <button
-                      onClick={() => void handleRemove(m)}
-                      disabled={busy}
-                      style={{ color: "#c0392b", borderColor: "#c0392b" }}
-                    >
-                      {busy ? "…" : "Remove"}
-                    </button>
+                    <Button size="sm" variant="danger" loading={busy} onClick={() => void handleRemove(m)}>
+                      Remove
+                    </Button>
                   )}
                 </div>
-              )}
-            </div>
-          );
-        })
+              );
+            },
+          } as Column<BusinessMembership>,
+        ]
+      : []),
+  ];
+
+  const editingMember = members?.find((m) => m.id === editingLabelId) ?? null;
+
+  return (
+    <div className="aifa-page">
+      <PageHeader
+        title="Members & Roles"
+        description={`This business is currently in ${accessModel} mode (Vol 13_3 §2 — automatically becomes "team" once a second active member exists).`}
+      />
+
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
       )}
-      {actionError && <p className="error">{actionError}</p>}
-      {labelError && <p className="error">{labelError}</p>}
+
+      <Card
+        title="Your display name"
+        description="Shown to teammates in this list, and used to address you by name wherever AiFA refers to who's who."
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!myNameBusy && myNameDraft.trim()) void handleSaveMyName();
+          }}
+        >
+          <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+            <Field label="Your name">
+              {(p) => <input {...p} className="ui-input" type="text" value={myNameDraft} onChange={(e) => setMyNameDraft(e.target.value)} />}
+            </Field>
+            <Button type="submit" variant="primary" loading={myNameBusy} disabled={!myNameDraft.trim()}>
+              {myNameBusy ? "Saving…" : "Save"}
+            </Button>
+          </div>
+          {myNameError && (
+            <p className="aifa-alert aifa-alert--danger" role="alert">
+              {myNameError}
+            </p>
+          )}
+        </form>
+      </Card>
+
+      {isOwner && (
+        <Card title="Invite a member">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!inviteBusy && inviteEmail.trim()) void handleInvite();
+            }}
+          >
+            <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+              <Field label="Email">
+                {(p) => (
+                  <input {...p} className="ui-input" type="email" placeholder="email@example.com" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
+                )}
+              </Field>
+              <Field label="Role">
+                {(p) => (
+                  <select {...p} className="ui-select" value={inviteRoleId} onChange={(e) => setInviteRoleId(e.target.value)}>
+                    {roles?.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+              <Button type="submit" variant="primary" loading={inviteBusy} disabled={!inviteEmail.trim()}>
+                {inviteBusy ? "Sending…" : "Send invite"}
+              </Button>
+            </div>
+            {inviteError && (
+              <p className="aifa-alert aifa-alert--danger" role="alert">
+                {inviteError}
+              </p>
+            )}
+          </form>
+        </Card>
+      )}
+
+      {isOwner && editingMember && (
+        <Card title="Set label" description={`For ${resolvedName(editingMember)}. Shown to the whole team; blank clears it.`}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (labelBusyId !== editingMember.id) void handleSaveLabel(editingMember);
+            }}
+          >
+            <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+              <Field label="Label">
+                {(p) => <input {...p} className="ui-input" type="text" value={labelDraft} onChange={(e) => setLabelDraft(e.target.value)} autoFocus />}
+              </Field>
+              <Button type="submit" variant="primary" loading={labelBusyId === editingMember.id}>
+                {labelBusyId === editingMember.id ? "Saving…" : "Save"}
+              </Button>
+              <Button variant="secondary" disabled={labelBusyId === editingMember.id} onClick={cancelEditingLabel}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {actionError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {actionError}
+        </p>
+      )}
+      {labelError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {labelError}
+        </p>
+      )}
+
+      <Card title="Team" flush>
+        <DataTable
+          caption="Members"
+          columns={columns}
+          rows={loadError ? [] : visibleMembers}
+          rowKey={(m) => m.id}
+          empty={<div className="ui-table-state">No members to show.</div>}
+        />
+      </Card>
     </div>
   );
 }
