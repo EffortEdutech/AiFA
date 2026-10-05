@@ -286,3 +286,6 @@
 
 /* Phase 4 — link styled as a button */
 a.ui-btn { text-decoration: none; }
+
+/* Phase 4 — chip */
+.ui-chip { display: inline-flex; align-items: center; padding: 2px 10px; border: 1px solid var(--aifa-border); border-radius: 999px; background: var(--aifa-surface-muted); font-size: var(--aifa-font-size-sm); color: var(--aifa-text); }

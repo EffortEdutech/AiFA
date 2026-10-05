@@ -15,6 +15,9 @@
  * therefore stays a real top-level sidebar item, gated correctly, and
  * simply reuses Sprint 39's `listProducts` for the product list rather
  * than duplicating product CRUD.
+ *
+ * UI polish Phase 4: presentation only — warehouse chips, a stock matrix
+ * table and a labelled warehouse form. Same calls.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -22,6 +25,7 @@ import { createSupabaseInventoryDeliveryTransport } from "@aifa/core/sync/invent
 import type { Warehouse, StockLevel } from "@aifa/core/sync/inventoryDeliveryTransport";
 import type { Product } from "@aifa/core/sync/pricingTransport";
 
+import { Button, Card, DataTable, EmptyState, Field, PageHeader, type Column } from "../../ui";
 import { supabase } from "../../lib/supabaseClient";
 import { listProducts } from "../../lib/productsAndPricing";
 import { listWarehouses, listStockLevels } from "../../lib/inventoryAndDelivery";
@@ -109,106 +113,136 @@ export function ProductsStockPage({ businessId }: Props): JSX.Element {
     return stockLevels.find((s) => s.productId === productId && s.warehouseId === warehouseId);
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Products &amp; Stock</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
-
   const trackedProducts = (products ?? []).filter((p) => p.trackInventory);
+
+  const columns: Column<Product>[] = [
+    {
+      key: "product",
+      header: "Product",
+      render: (p) => (
+        <>
+          <strong>{p.name}</strong>
+          <div className="ui-cell-sub">{p.sku}</div>
+        </>
+      ),
+    },
+    ...warehouses.map(
+      (w): Column<Product> => ({
+        key: w.id,
+        header: w.name,
+        numeric: true,
+        render: (p) => {
+          const level = levelFor(p.id, w.id);
+          const isOpeningTarget = openingFor?.productId === p.id && openingFor?.warehouseId === w.id;
+          if (level) return level.quantityOnHand;
+          if (isOpeningTarget) {
+            return (
+              <span className="ui-inline-actions" style={{ justifyContent: "flex-end" }}>
+                <input
+                  className="ui-input"
+                  aria-label={`Opening quantity for ${p.name} in ${w.name}`}
+                  placeholder="Qty"
+                  inputMode="decimal"
+                  value={openingQty}
+                  onChange={(e) => setOpeningQty(e.target.value)}
+                  style={{ width: 80 }}
+                />
+                <Button size="sm" variant="primary" loading={openingBusy} disabled={!openingQty.trim()} onClick={() => void handleRecordOpening()}>
+                  Save
+                </Button>
+              </span>
+            );
+          }
+          return (
+            <Button size="sm" variant="secondary" onClick={() => setOpeningFor({ productId: p.id, warehouseId: w.id })}>
+              Set opening stock
+            </Button>
+          );
+        },
+      }),
+    ),
+  ];
 
   return (
     <div className="aifa-page">
-      <h1>Products &amp; Stock</h1>
+      <PageHeader
+        title="Products & Stock"
+        description="Stock on hand per product and warehouse."
+        actions={
+          <Button variant="primary" icon={showAddWarehouse ? undefined : "plus"} onClick={() => setShowAddWarehouse((s) => !s)}>
+            {showAddWarehouse ? "Cancel" : "Warehouse"}
+          </Button>
+        }
+      />
 
-      <h2 style={{ fontSize: 14, marginTop: 0 }}>Warehouses</h2>
-      <div className="row" style={{ flexWrap: "wrap", marginBottom: 8 }}>
-        {warehouses.map((w) => (
-          <span key={w.id} className="muted" style={{ padding: "2px 8px", border: "1px solid var(--aifa-border, #e2e2e2)", borderRadius: 4 }}>
-            {w.name}
-          </span>
-        ))}
-        <button onClick={() => setShowAddWarehouse((s) => !s)} style={{ padding: "2px 8px" }}>
-          {showAddWarehouse ? "Cancel" : "+ Warehouse"}
-        </button>
-      </div>
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
+
       {showAddWarehouse && (
-        <div className="card" style={{ marginBottom: 12 }}>
-          <div className="row">
-            <input placeholder="Warehouse name" value={warehouseName} onChange={(e) => setWarehouseName(e.target.value)} style={{ padding: 6, flex: 1 }} />
-            <button onClick={() => void handleAddWarehouse()} disabled={warehouseBusy || !warehouseName.trim()}>
-              {warehouseBusy ? "Creating…" : "Create"}
-            </button>
-          </div>
-          <p className="muted" style={{ marginTop: 4 }}>
-            Creating a warehouse requires `configure` on `inventory` — only the Owner role holds that by default; the server will reject this otherwise.
-          </p>
-          {warehouseError && <p className="error">{warehouseError}</p>}
-        </div>
+        <Card title="New warehouse">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!warehouseBusy && warehouseName.trim()) void handleAddWarehouse();
+            }}
+          >
+            <Field
+              label="Warehouse name"
+              required
+              hint="Creating a warehouse requires `configure` on `inventory` — only the Owner role holds that by default; the server will reject this otherwise."
+              error={warehouseError}
+            >
+              {(p) => <input {...p} className="ui-input" value={warehouseName} onChange={(e) => setWarehouseName(e.target.value)} />}
+            </Field>
+            <div className="ui-form-actions">
+              <Button type="submit" variant="primary" loading={warehouseBusy} disabled={!warehouseName.trim()}>
+                {warehouseBusy ? "Creating…" : "Create"}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {warehouses.length > 0 && (
+        <p className="ui-inline-actions" style={{ marginTop: 0 }}>
+          <span className="ui-muted">Warehouses:</span>
+          {warehouses.map((w) => (
+            <span key={w.id} className="ui-chip">
+              {w.name}
+            </span>
+          ))}
+        </p>
+      )}
+
+      {openingError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {openingError}
+        </p>
       )}
 
       {warehouses.length === 0 ? (
-        <p className="muted">Add a warehouse above before recording stock.</p>
-      ) : products === null ? (
-        <p className="muted">Loading…</p>
-      ) : trackedProducts.length === 0 ? (
-        <p className="muted">No stock-tracked products yet — add one on the Pricing &amp; Catalog page and enable "track inventory."</p>
+        <Card>
+          <EmptyState title="No warehouses yet" description="Add a warehouse above before recording stock." />
+        </Card>
       ) : (
-        <div className="card" style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ textAlign: "left" }}>
-                <th style={{ padding: 6 }}>Product</th>
-                {warehouses.map((w) => (
-                  <th key={w.id} style={{ padding: 6 }}>
-                    {w.name}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {trackedProducts.map((p) => (
-                <tr key={p.id} style={{ borderTop: "1px solid var(--aifa-border, #e2e2e2)" }}>
-                  <td style={{ padding: 6 }}>
-                    {p.name} <span className="muted">({p.sku})</span>
-                  </td>
-                  {warehouses.map((w) => {
-                    const level = levelFor(p.id, w.id);
-                    const isOpeningTarget = openingFor?.productId === p.id && openingFor?.warehouseId === w.id;
-                    return (
-                      <td key={w.id} style={{ padding: 6 }}>
-                        {level ? (
-                          <span>{level.quantityOnHand}</span>
-                        ) : isOpeningTarget ? (
-                          <span className="row">
-                            <input
-                              placeholder="Qty"
-                              value={openingQty}
-                              onChange={(e) => setOpeningQty(e.target.value)}
-                              style={{ padding: 4, width: 70 }}
-                            />
-                            <button onClick={() => void handleRecordOpening()} disabled={openingBusy || !openingQty.trim()} style={{ padding: "2px 6px" }}>
-                              {openingBusy ? "…" : "Save"}
-                            </button>
-                          </span>
-                        ) : (
-                          <button onClick={() => setOpeningFor({ productId: p.id, warehouseId: w.id })} style={{ padding: "2px 6px" }}>
-                            Set opening stock
-                          </button>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Card flush>
+          <DataTable
+            caption="Stock on hand by product and warehouse"
+            columns={columns}
+            rows={loadError ? [] : products === null ? null : trackedProducts}
+            rowKey={(p) => p.id}
+            empty={
+              <EmptyState
+                title="No stock-tracked products yet"
+                description='Add one on the Pricing & Catalog page and enable "track inventory."'
+              />
+            }
+          />
+        </Card>
       )}
-      {openingError && <p className="error">{openingError}</p>}
     </div>
   );
 }

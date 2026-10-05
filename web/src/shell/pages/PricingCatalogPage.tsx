@@ -11,6 +11,9 @@
  * would — Excel support is a small, scoped follow-on (swap in a
  * client-side .xlsx reader) once the owner confirms it's needed over
  * CSV export from whatever they currently use.
+ *
+ * UI polish Phase 4: presentation only — resolve-price and create forms in
+ * cards, tables for products / price types / batches, row-select price detail.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -18,6 +21,7 @@ import { createSupabasePricingTransport } from "@aifa/core/sync/pricingTransport
 import type { CostSource, PriceType, Product, PriceListEntry, ProductImportBatch, ResolvedPrice } from "@aifa/core/sync/pricingTransport";
 import { detectColumns, parseProductImportRows, type ParsedSheetRow } from "@aifa/core/catalog/productImportParser";
 
+import { Button, Card, DataTable, Field, PageHeader, StatusPill, formatMoney, humanizeStatus, type Column } from "../../ui";
 import { supabase } from "../../lib/supabaseClient";
 import { listProducts, listPriceTypes, listPriceListEntries, listProductImportBatches } from "../../lib/productsAndPricing";
 import { listParties } from "../../lib/partiesAndAccounts";
@@ -198,174 +202,275 @@ export function PricingCatalogPage({ businessId }: Props): JSX.Element {
     }
   }
 
+  const selectedProduct = expandedProductId ? (products ?? []).find((p) => p.id === expandedProductId) : undefined;
+
+  const productColumns: Column<Product>[] = [
+    {
+      key: "p",
+      header: "Product",
+      render: (p) => (
+        <>
+          <strong>{p.name}</strong>
+          {p.sku && <div className="ui-cell-sub">{p.sku}</div>}
+        </>
+      ),
+    },
+    { key: "unit", header: "Unit", render: (p) => p.unitOfMeasure },
+    { key: "cost", header: "Default cost", numeric: true, render: (p) => (p.defaultCost != null ? formatMoney(p.defaultCost) : "—") },
+    { key: "status", header: "Status", render: (p) => <StatusPill status={p.status} label={humanizeStatus(p.status)} /> },
+    { key: "stock", header: "Stock", render: (p) => (p.trackInventory ? "Stock-tracked" : "—") },
+  ];
+
+  const priceTypeColumns: Column<PriceType>[] = [
+    { key: "name", header: "Price type", render: (pt) => <strong>{pt.name}</strong> },
+    { key: "default", header: "Default", render: (pt) => (pt.isDefault ? <StatusPill status="active" label="Default" /> : "—") },
+    {
+      key: "actions",
+      header: "",
+      render: (pt) =>
+        pt.isDefault ? null : (
+          <Button size="sm" variant="secondary" onClick={() => void handleSetDefault(pt.id)}>
+            Set as default
+          </Button>
+        ),
+    },
+  ];
+
+  const batchColumns: Column<ProductImportBatch>[] = [
+    { key: "file", header: "File", render: (b) => <strong>{b.sourceFileRef}</strong> },
+    { key: "status", header: "Status", render: (b) => <StatusPill status={b.status} label={humanizeStatus(b.status)} /> },
+    { key: "rows", header: "Rows", numeric: true, render: (b) => b.rowCount },
+    { key: "errors", header: "Errors", numeric: true, render: (b) => b.errorCount },
+    {
+      key: "actions",
+      header: "",
+      render: (b) => {
+        if (b.status === "parsed" && b.errorCount === 0) {
+          return (
+            <Button size="sm" variant="primary" onClick={() => void handleApplyBatch(b.id)}>
+              Apply batch
+            </Button>
+          );
+        }
+        if (b.status === "parsed" && b.errorCount > 0) {
+          return <span className="ui-muted">Fix the error rows in a new file and re-stage — this batch stays unapplied.</span>;
+        }
+        return null;
+      },
+    },
+  ];
+
   return (
     <div className="aifa-page">
-      <h1>Pricing & Catalog</h1>
-      <TabStrip
-        tabs={[
-          { id: "products", label: "Products", count: products?.length },
-          { id: "price-types", label: "Price Types", count: priceTypes?.length },
-          { id: "import", label: "Import Batches", count: batches?.length },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
-      {error && <p className="error">{error}</p>}
+      <PageHeader
+        title="Pricing & Catalog"
+        actions={
+          tab === "products" ? (
+            <Button variant="primary" icon={showCreateProduct ? undefined : "plus"} onClick={() => setShowCreateProduct((s) => !s)}>
+              {showCreateProduct ? "Cancel" : "New product"}
+            </Button>
+          ) : undefined
+        }
+      >
+        <TabStrip
+          tabs={[
+            { id: "products", label: "Products", count: products?.length },
+            { id: "price-types", label: "Price Types", count: priceTypes?.length },
+            { id: "import", label: "Import Batches", count: batches?.length },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
+      {error && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {error}
+        </p>
+      )}
 
       {tab === "products" && (
         <>
-          <div className="card">
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>Resolve price (PRICE-001)</h2>
-            <div className="row">
-              <select value={resolveProductId} onChange={(e) => setResolveProductId(e.target.value)} style={{ padding: 6 }}>
-                <option value="">Choose a product…</option>
-                {products?.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <select value={resolvePartyId} onChange={(e) => setResolvePartyId(e.target.value)} style={{ padding: 6 }}>
-                <option value="">Business default (no party)</option>
-                {parties?.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.displayName}
-                  </option>
-                ))}
-              </select>
-              <button onClick={() => void handleResolvePrice()} disabled={!resolveProductId}>
+          <Card title="Resolve price (PRICE-001)">
+            <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+              <Field label="Product">
+                {(p) => (
+                  <select {...p} className="ui-select" value={resolveProductId} onChange={(e) => setResolveProductId(e.target.value)}>
+                    <option value="">Choose a product…</option>
+                    {products?.map((pr) => (
+                      <option key={pr.id} value={pr.id}>
+                        {pr.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+              <Field label="Party">
+                {(p) => (
+                  <select {...p} className="ui-select" value={resolvePartyId} onChange={(e) => setResolvePartyId(e.target.value)}>
+                    <option value="">Business default (no party)</option>
+                    {parties?.map((pt) => (
+                      <option key={pt.id} value={pt.id}>
+                        {pt.displayName}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+              <Button variant="secondary" disabled={!resolveProductId} onClick={() => void handleResolvePrice()}>
                 Resolve
-              </button>
+              </Button>
             </div>
-            {resolveError && <p className="error">{resolveError}</p>}
+            {resolveError && (
+              <p className="aifa-alert aifa-alert--danger" role="alert">
+                {resolveError}
+              </p>
+            )}
             {resolveResult && (
-              <p className="muted" style={{ margin: "4px 0" }}>
-                RM{resolveResult.unitPrice.toFixed(2)}
+              <p className="aifa-alert aifa-alert--info" role="status">
+                {formatMoney(resolveResult.unitPrice)}
                 {resolveResult.usedBusinessDefault ? " (business default price type used)" : ""}
               </p>
             )}
-          </div>
+          </Card>
 
-          <div className="row" style={{ margin: "12px 0" }}>
-            <button onClick={() => setShowCreateProduct((s) => !s)}>{showCreateProduct ? "Cancel" : "New product"}</button>
-          </div>
           {showCreateProduct && (
-            <div className="card">
-              <div className="row">
-                <input placeholder="Name" value={productName} onChange={(e) => setProductName(e.target.value)} style={{ padding: 6, flex: 1 }} />
-                <input placeholder="SKU" value={productSku} onChange={(e) => setProductSku(e.target.value)} style={{ padding: 6, width: 120 }} />
-                <input placeholder="Unit" value={productUnit} onChange={(e) => setProductUnit(e.target.value)} style={{ padding: 6, width: 100 }} />
-                <input placeholder="Default cost (RM)" value={productCost} onChange={(e) => setProductCost(e.target.value)} style={{ padding: 6, width: 140 }} />
-                <button onClick={() => void handleCreateProduct()} disabled={createBusy || !productName.trim()}>
-                  {createBusy ? "Creating…" : "Create"}
-                </button>
-              </div>
-            </div>
+            <Card title="New product">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!createBusy && productName.trim()) void handleCreateProduct();
+                }}
+              >
+                <div className="ui-form-grid">
+                  <Field label="Name" required>
+                    {(p) => <input {...p} className="ui-input" value={productName} onChange={(e) => setProductName(e.target.value)} />}
+                  </Field>
+                  <Field label="SKU">
+                    {(p) => <input {...p} className="ui-input" value={productSku} onChange={(e) => setProductSku(e.target.value)} />}
+                  </Field>
+                  <Field label="Unit">
+                    {(p) => <input {...p} className="ui-input" value={productUnit} onChange={(e) => setProductUnit(e.target.value)} />}
+                  </Field>
+                  <Field label="Default cost (RM)">
+                    {(p) => <input {...p} className="ui-input" inputMode="decimal" value={productCost} onChange={(e) => setProductCost(e.target.value)} />}
+                  </Field>
+                </div>
+                <div className="ui-form-actions">
+                  <Button type="submit" variant="primary" loading={createBusy} disabled={!productName.trim()}>
+                    {createBusy ? "Creating…" : "Create"}
+                  </Button>
+                </div>
+              </form>
+            </Card>
           )}
 
-          {products === null ? (
-            <p className="muted">Loading…</p>
-          ) : (
-            products.map((p) => (
-              <div key={p.id} className="card">
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <strong>
-                    {p.name}
-                    {p.sku ? ` (${p.sku})` : ""}
-                  </strong>
-                  <button onClick={() => void toggleExpand(p.id)}>{expandedProductId === p.id ? "Hide prices" : "Show prices"}</button>
-                </div>
-                <p className="muted" style={{ margin: "4px 0" }}>
-                  {p.unitOfMeasure}
-                  {p.defaultCost != null && ` · Cost RM${p.defaultCost.toFixed(2)}`} · {p.status}
-                  {p.trackInventory ? " · Stock-tracked" : ""}
-                </p>
-                {expandedProductId === p.id && (
-                  <AddPriceEntry
-                    productId={p.id}
-                    priceTypes={priceTypes ?? []}
-                    entries={priceEntries[p.id] ?? []}
-                    onAdded={async () => {
-                      const entries = await listPriceListEntries(p.id);
-                      setPriceEntries((prev) => ({ ...prev, [p.id]: entries }));
-                    }}
-                  />
-                )}
-              </div>
-            ))
+          {selectedProduct && (
+            <Card
+              title={`${selectedProduct.name}${selectedProduct.sku ? ` (${selectedProduct.sku})` : ""} — prices`}
+              actions={
+                <Button size="sm" variant="ghost" onClick={() => setExpandedProductId(null)}>
+                  Close
+                </Button>
+              }
+            >
+              <AddPriceEntry
+                productId={selectedProduct.id}
+                priceTypes={priceTypes ?? []}
+                entries={priceEntries[selectedProduct.id] ?? []}
+                onAdded={async () => {
+                  const entries = await listPriceListEntries(selectedProduct.id);
+                  setPriceEntries((prev) => ({ ...prev, [selectedProduct.id]: entries }));
+                }}
+              />
+            </Card>
           )}
+
+          <Card flush>
+            <DataTable
+              caption="Products"
+              columns={productColumns}
+              rows={products}
+              rowKey={(p) => p.id}
+              onRowClick={(p) => void toggleExpand(p.id)}
+              selectedKey={expandedProductId}
+              empty={<div className="ui-table-state">No products yet.</div>}
+            />
+          </Card>
         </>
       )}
 
       {tab === "price-types" && (
         <>
-          <div className="card">
-            <div className="row">
-              <input
-                placeholder="New price type name"
-                value={newPriceTypeName}
-                onChange={(e) => setNewPriceTypeName(e.target.value)}
-                style={{ padding: 6, flex: 1 }}
-              />
-              <button onClick={() => void handleCreatePriceType()} disabled={!newPriceTypeName.trim()}>
-                Create
-              </button>
-            </div>
-          </div>
-          {priceTypes?.map((pt) => (
-            <div key={pt.id} className="card">
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <strong>
-                  {pt.name}
-                  {pt.isDefault ? " (default)" : ""}
-                </strong>
-                {!pt.isDefault && <button onClick={() => void handleSetDefault(pt.id)}>Set as default</button>}
+          <Card title="New price type">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (newPriceTypeName.trim()) void handleCreatePriceType();
+              }}
+            >
+              <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <Field label="Price type name">
+                    {(p) => <input {...p} className="ui-input" value={newPriceTypeName} onChange={(e) => setNewPriceTypeName(e.target.value)} />}
+                  </Field>
+                </div>
+                <Button type="submit" variant="primary" disabled={!newPriceTypeName.trim()}>
+                  Create
+                </Button>
               </div>
-            </div>
-          ))}
+            </form>
+          </Card>
+          <Card flush>
+            <DataTable
+              caption="Price types"
+              columns={priceTypeColumns}
+              rows={priceTypes}
+              rowKey={(pt) => pt.id}
+              empty={<div className="ui-table-state">No price types yet.</div>}
+            />
+          </Card>
         </>
       )}
 
       {tab === "import" && (
         <>
-          <div className="card">
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>Stage a CSV import</h2>
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void handleFileChosen(f);
-              }}
-            />
+          <Card title="Stage a CSV import">
+            <Field label="CSV file" hint="CSV with a header row. Excel (.xlsx) isn't supported yet.">
+              {(p) => (
+                <input
+                  {...p}
+                  className="ui-input"
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void handleFileChosen(f);
+                  }}
+                />
+              )}
+            </Field>
             {importPreview && (
               <>
-                <p className="muted" style={{ margin: "8px 0" }}>
+                <p className="ui-note">
                   {importPreview.length} rows parsed — {importPreview.filter((r) => r.parseStatus === "error").length} with errors.
                 </p>
-                <button onClick={() => void handleStageImport()} disabled={importBusy}>
-                  {importBusy ? "Staging…" : "Stage this batch"}
-                </button>
+                <div className="ui-form-actions">
+                  <Button variant="primary" loading={importBusy} onClick={() => void handleStageImport()}>
+                    {importBusy ? "Staging…" : "Stage this batch"}
+                  </Button>
+                </div>
               </>
             )}
-          </div>
-          {batches?.map((b) => (
-            <div key={b.id} className="card">
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <strong>{b.sourceFileRef}</strong>
-                <span className="muted">{b.status}</span>
-              </div>
-              <p className="muted" style={{ margin: "4px 0" }}>
-                {b.rowCount} rows · {b.errorCount} errors
-              </p>
-              {b.status === "parsed" && b.errorCount === 0 && (
-                <button onClick={() => void handleApplyBatch(b.id)}>Apply batch</button>
-              )}
-              {b.status === "parsed" && b.errorCount > 0 && (
-                <p className="muted">Fix the error rows in a new file and re-stage — this batch stays unapplied.</p>
-              )}
-            </div>
-          ))}
+          </Card>
+          <Card flush>
+            <DataTable
+              caption="Import batches"
+              columns={batchColumns}
+              rows={batches}
+              rowKey={(b) => b.id}
+              empty={<div className="ui-table-state">No import batches yet.</div>}
+            />
+          </Card>
         </>
       )}
     </div>
@@ -403,27 +508,52 @@ function AddPriceEntry({
     }
   }
 
+  const columns: Column<PriceListEntry>[] = [
+    { key: "type", header: "Price type", render: (e) => priceTypes.find((pt) => pt.id === e.priceTypeId)?.name ?? e.priceTypeId },
+    { key: "price", header: "Unit price", numeric: true, render: (e) => formatMoney(e.unitPrice) },
+  ];
+
   return (
-    <div style={{ borderTop: "1px solid var(--aifa-border)", marginTop: 8, paddingTop: 8 }}>
-      {entries.map((e) => (
-        <p key={e.id} className="muted" style={{ margin: "2px 0" }}>
-          {priceTypes.find((pt) => pt.id === e.priceTypeId)?.name ?? e.priceTypeId} — RM{e.unitPrice.toFixed(2)}
-        </p>
-      ))}
-      <div className="row" style={{ marginTop: 6 }}>
-        <select value={priceTypeId} onChange={(ev) => setPriceTypeId(ev.target.value)} style={{ padding: 6 }}>
-          {priceTypes.map((pt) => (
-            <option key={pt.id} value={pt.id}>
-              {pt.name}
-            </option>
-          ))}
-        </select>
-        <input placeholder="Unit price (RM)" value={unitPrice} onChange={(ev) => setUnitPrice(ev.target.value)} style={{ padding: 6, width: 140 }} />
-        <button onClick={() => void handleAdd()} disabled={busy || !unitPrice.trim()}>
-          {busy ? "Adding…" : "Add price"}
-        </button>
-      </div>
-      {err && <p className="error">{err}</p>}
-    </div>
+    <>
+      <DataTable
+        caption="Price list entries"
+        columns={columns}
+        rows={entries}
+        rowKey={(e) => e.id}
+        empty={<div className="ui-table-state">No prices set for this product yet.</div>}
+      />
+      <form
+        onSubmit={(ev) => {
+          ev.preventDefault();
+          if (!busy && priceTypeId && unitPrice.trim()) void handleAdd();
+        }}
+        style={{ marginTop: "var(--aifa-space-4)" }}
+      >
+        <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+          <Field label="Price type">
+            {(p) => (
+              <select {...p} className="ui-select" value={priceTypeId} onChange={(ev) => setPriceTypeId(ev.target.value)}>
+                {priceTypes.map((pt) => (
+                  <option key={pt.id} value={pt.id}>
+                    {pt.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+          <Field label="Unit price (RM)">
+            {(p) => <input {...p} className="ui-input" inputMode="decimal" value={unitPrice} onChange={(ev) => setUnitPrice(ev.target.value)} />}
+          </Field>
+          <Button type="submit" variant="primary" loading={busy} disabled={!unitPrice.trim()}>
+            {busy ? "Adding…" : "Add price"}
+          </Button>
+        </div>
+        {err && (
+          <p className="aifa-alert aifa-alert--danger" role="alert">
+            {err}
+          </p>
+        )}
+      </form>
+    </>
   );
 }
