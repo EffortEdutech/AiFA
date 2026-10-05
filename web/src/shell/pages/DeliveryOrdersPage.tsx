@@ -19,6 +19,9 @@
  * any stock-tracked line doesn't have enough quantity_on_hand — this
  * page surfaces both as a clear, specific blocked-reason rather than a
  * generic failure message.
+ *
+ * UI polish Phase 4: presentation only — table with the effective state as a
+ * pill, row-select detail for lines, labelled create form. Same calls.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -28,6 +31,7 @@ import type { ApprovalTask } from "@aifa/core/sync/approvalEngineTransport";
 import type { Invoice } from "@aifa/core/sync/quotationInvoiceTransport";
 import type { Product } from "@aifa/core/sync/pricingTransport";
 
+import { Button, Card, DataTable, Field, PageHeader, StatusPill, formatDate, type Column } from "../../ui";
 import { supabase } from "../../lib/supabaseClient";
 import { listApprovalTasks } from "../../lib/approvals";
 import { listInvoices } from "../../lib/salesCycle";
@@ -248,173 +252,263 @@ export function DeliveryOrdersPage({ businessId, onGoToApprovals }: Props): JSX.
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Delivery Orders</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
-
   const withState = (orders ?? []).map((o) => ({ order: o, state: effectiveState(o, taskFor(o.id)) }));
   const filtered = withState.filter((x) => tab === "all" || x.state === tab);
   const counts = (state: EffectiveDoState) => withState.filter((x) => x.state === state).length;
+  type Row = (typeof withState)[number];
+  const expandedOrder = expandedId ? withState.find((x) => x.order.id === expandedId) : undefined;
+
+  const stateTone = (state: EffectiveDoState): "warning" | "info" | "success" | "danger" | "neutral" => {
+    switch (state) {
+      case "pending_approval":
+        return "warning";
+      case "approved_awaiting_dispatch":
+        return "info";
+      case "dispatched":
+        return "info";
+      case "delivered":
+        return "success";
+      case "rejected":
+        return "danger";
+    }
+  };
+
+  const columns: Column<Row>[] = [
+    {
+      key: "do",
+      header: "Delivery order",
+      render: ({ order }) => (
+        <>
+          <strong>{order.doNo}</strong>
+          <div className="ui-cell-sub">{invoiceLabel(order.invoiceId)}</div>
+        </>
+      ),
+    },
+    { key: "wh", header: "Warehouse", render: ({ order }) => warehouseName(order.warehouseId) },
+    { key: "issued", header: "Issued", render: ({ order }) => formatDate(order.issueDate) },
+    {
+      key: "state",
+      header: "Status",
+      render: ({ state }) => <StatusPill status={state} label={stateLabel(state)} tone={stateTone(state)} />,
+    },
+    {
+      key: "actions",
+      header: "",
+      render: ({ order, state }) => {
+        const busy = busyId === order.id;
+        const blockedReason = blockedReasonById[order.id];
+        return (
+          <span onClick={(e) => e.stopPropagation()}>
+            {state === "approved_awaiting_dispatch" && (
+              <Button size="sm" variant="primary" loading={busy} onClick={() => void handleDispatch(order)}>
+                {busy ? "Dispatching…" : "Dispatch (posts stock now)"}
+              </Button>
+            )}
+            {state === "pending_approval" && (
+              <span className="ui-muted">Waiting on approval before this can be dispatched.</span>
+            )}
+            {state === "dispatched" && (
+              <Button size="sm" variant="secondary" loading={busy} onClick={() => void handleMarkDelivered(order)}>
+                {busy ? "Marking delivered…" : "Mark Delivered (self-reported)"}
+              </Button>
+            )}
+            {blockedReason && (
+              <div className="aifa-alert aifa-alert--danger" role="alert" style={{ marginTop: 6 }}>
+                {blockedReason}
+              </div>
+            )}
+          </span>
+        );
+      },
+    },
+  ];
 
   return (
     <div className="aifa-page">
-      <h1>Delivery Orders</h1>
-      <TabStrip
-        tabs={[
-          { id: "all", label: "All", count: withState.length },
-          { id: "pending_approval", label: "Pending approval", count: counts("pending_approval") },
-          { id: "approved_awaiting_dispatch", label: "Approved — awaiting dispatch", count: counts("approved_awaiting_dispatch") },
-          { id: "dispatched", label: "Dispatched", count: counts("dispatched") },
-          { id: "delivered", label: "Delivered", count: counts("delivered") },
-          { id: "rejected", label: "Rejected", count: counts("rejected") },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
+      <PageHeader
+        title="Delivery Orders"
+        description='A new delivery order routes through the Approvals inbox. Its own status stays "draft" until Dispatch is pressed — this page reads the linked approval task to show the real state.'
+        actions={
+          <>
+            {onGoToApprovals && (
+              <Button variant="secondary" onClick={onGoToApprovals}>
+                Go to Approvals
+              </Button>
+            )}
+            <Button variant="primary" icon={showCreate ? undefined : "plus"} onClick={() => setShowCreate((s) => !s)}>
+              {showCreate ? "Cancel" : "New delivery order"}
+            </Button>
+          </>
+        }
+      >
+        <TabStrip
+          tabs={[
+            { id: "all", label: "All", count: withState.length },
+            { id: "pending_approval", label: "Pending approval", count: counts("pending_approval") },
+            { id: "approved_awaiting_dispatch", label: "Approved — awaiting dispatch", count: counts("approved_awaiting_dispatch") },
+            { id: "dispatched", label: "Dispatched", count: counts("dispatched") },
+            { id: "delivered", label: "Delivered", count: counts("delivered") },
+            { id: "rejected", label: "Rejected", count: counts("rejected") },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
+      {!onGoToApprovals && (
+        <p className="ui-muted" style={{ marginTop: 0 }}>
+          See the Approvals sidebar item.
+        </p>
+      )}
 
-      <p className="muted" style={{ margin: "8px 0" }}>
-        A new delivery order routes through the Approvals inbox. Its own status stays "draft" until Dispatch is
-        pressed — this page reads the linked approval task to show the real state.{" "}
-        {onGoToApprovals ? (
-          <button onClick={onGoToApprovals} style={{ padding: "0 4px" }}>
-            Go to Approvals
-          </button>
-        ) : (
-          "See the Approvals sidebar item."
-        )}
-      </p>
-
-      <div className="row" style={{ margin: "12px 0" }}>
-        <button onClick={() => setShowCreate((s) => !s)}>{showCreate ? "Cancel" : "New delivery order"}</button>
-      </div>
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
 
       {showCreate && (
-        <div className="card">
-          <h2 style={{ fontSize: 16, marginTop: 0 }}>New delivery order</h2>
-          <div className="row">
-            <select value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)} style={{ padding: 6, minWidth: 220 }}>
-              <option value="">Select invoice…</option>
-              {invoices.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.invoiceNo}
-                </option>
-              ))}
-            </select>
-            <select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} style={{ padding: 6, minWidth: 180 }}>
-              <option value="">Select warehouse…</option>
-              {warehouses.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          {warehouses.length === 0 && (
-            <p className="muted" style={{ marginTop: 4 }}>
-              No warehouses yet — add one on the Products &amp; Stock page first.
+        <Card title="New delivery order">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!createBusy && invoiceId && warehouseId) void handleCreate();
+            }}
+          >
+            <div className="ui-form-grid">
+              <Field label="Invoice" required>
+                {(p) => (
+                  <select {...p} className="ui-select" value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)}>
+                    <option value="">Select invoice…</option>
+                    {invoices.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.invoiceNo}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+              <Field
+                label="Warehouse"
+                required
+                hint={warehouses.length === 0 ? "No warehouses yet — add one on the Products & Stock page first." : undefined}
+              >
+                {(p) => (
+                  <select {...p} className="ui-select" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
+                    <option value="">Select warehouse…</option>
+                    {warehouses.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+              <Field label="Notes (optional)">
+                {(p) => <input {...p} className="ui-input" value={notes} onChange={(e) => setNotes(e.target.value)} />}
+              </Field>
+            </div>
+
+            <h3 className="ui-section-title">Lines</h3>
+            {lines.map((l, idx) => (
+              <div key={idx} className="ui-inline-actions" style={{ marginBottom: "var(--aifa-space-2)" }}>
+                <select
+                  className="ui-select"
+                  aria-label={`Line ${idx + 1} product`}
+                  value={l.productId}
+                  onChange={(e) => updateLine(idx, { productId: e.target.value })}
+                  style={{ flex: 1, minWidth: 200 }}
+                >
+                  <option value="">Select product…</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.sku}){!p.trackInventory ? " — not stock-tracked" : ""}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="ui-input"
+                  aria-label={`Line ${idx + 1} quantity`}
+                  placeholder="Qty"
+                  inputMode="decimal"
+                  value={l.quantity}
+                  onChange={(e) => updateLine(idx, { quantity: e.target.value })}
+                  style={{ width: 90 }}
+                />
+                {lines.length > 1 && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon="x"
+                    aria-label={`Remove line ${idx + 1}`}
+                    onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
+                  />
+                )}
+              </div>
+            ))}
+            <Button size="sm" variant="secondary" icon="plus" onClick={() => setLines((prev) => [...prev, emptyLine()])}>
+              Add line
+            </Button>
+            <p className="ui-note">
+              Lines for a non-stock-tracked product are recorded but silently skipped when stock is actually posted at dispatch.
             </p>
-          )}
-          <div className="row" style={{ marginTop: 8 }}>
-            <input placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} style={{ padding: 6, flex: 1 }} />
-          </div>
 
-          <h3 style={{ fontSize: 14, marginTop: 12, marginBottom: 4 }}>Lines</h3>
-          {lines.map((l, idx) => (
-            <div key={idx} className="row" style={{ marginTop: 4 }}>
-              <select value={l.productId} onChange={(e) => updateLine(idx, { productId: e.target.value })} style={{ padding: 6, minWidth: 220 }}>
-                <option value="">Select product…</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.sku}){!p.trackInventory ? " — not stock-tracked" : ""}
-                  </option>
-                ))}
-              </select>
-              <input placeholder="Qty" value={l.quantity} onChange={(e) => updateLine(idx, { quantity: e.target.value })} style={{ padding: 6, width: 70 }} />
-              {lines.length > 1 && (
-                <button onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))} style={{ padding: "0 6px" }}>
-                  ✕
-                </button>
-              )}
+            <div className="ui-form-actions">
+              <Button type="submit" variant="primary" loading={createBusy} disabled={!invoiceId || !warehouseId}>
+                {createBusy ? "Creating…" : "Create delivery order"}
+              </Button>
             </div>
-          ))}
-          <div className="row" style={{ marginTop: 6 }}>
-            <button onClick={() => setLines((prev) => [...prev, emptyLine()])}>Add line</button>
-          </div>
-          <p className="muted" style={{ marginTop: 4 }}>
-            Lines for a non-stock-tracked product are recorded but silently skipped when stock is actually posted at dispatch.
-          </p>
-
-          <div className="row" style={{ marginTop: 10 }}>
-            <button onClick={() => void handleCreate()} disabled={createBusy || !invoiceId || !warehouseId}>
-              {createBusy ? "Creating…" : "Create delivery order"}
-            </button>
-          </div>
-          {createError && <p className="error">{createError}</p>}
-        </div>
-      )}
-
-      {actionError && <p className="error">{actionError}</p>}
-
-      {orders === null ? (
-        <p className="muted">Loading…</p>
-      ) : filtered.length === 0 ? (
-        <p className="muted">No delivery orders in this view.</p>
-      ) : (
-        filtered.map(({ order, state }) => {
-          const busy = busyId === order.id;
-          const expanded = expandedId === order.id;
-          const blockedReason = blockedReasonById[order.id];
-          return (
-            <div key={order.id} className="card">
-              <div className="row" style={{ justifyContent: "space-between", cursor: "pointer" }} onClick={() => void toggleExpand(order)}>
-                <strong>
-                  {order.doNo} — {invoiceLabel(order.invoiceId)}
-                </strong>
-                <span className="muted">{stateLabel(state)}</span>
-              </div>
-              <p className="muted" style={{ margin: "4px 0" }}>
-                {warehouseName(order.warehouseId)} · issued {order.issueDate}
+            {createError && (
+              <p className="aifa-alert aifa-alert--danger" role="alert">
+                {createError}
               </p>
-              {order.notes && <p style={{ margin: "4px 0" }}>{order.notes}</p>}
-              {expanded && (
-                <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--aifa-border, #e2e2e2)" }}>
-                  {(linesById[order.id] ?? []).length === 0 ? (
-                    <p className="muted">Loading lines…</p>
-                  ) : (
-                    linesById[order.id].map((l) => (
-                      <p key={l.id} className="muted" style={{ margin: "2px 0" }}>
-                        {l.quantity} × {productLabel(l.productId)}
-                      </p>
-                    ))
-                  )}
-                </div>
-              )}
-
-              <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
-                {state === "approved_awaiting_dispatch" && (
-                  <button onClick={() => void handleDispatch(order)} disabled={busy}>
-                    {busy ? "Dispatching…" : "Dispatch (posts stock now)"}
-                  </button>
-                )}
-                {state === "pending_approval" && (
-                  <span className="muted">Waiting on approval before this can be dispatched.</span>
-                )}
-                {state === "dispatched" && (
-                  <button onClick={() => void handleMarkDelivered(order)} disabled={busy}>
-                    {busy ? "Marking delivered…" : "Mark Delivered (self-reported)"}
-                  </button>
-                )}
-              </div>
-              {blockedReason && <p className="error" style={{ marginTop: 6 }}>{blockedReason}</p>}
-            </div>
-          );
-        })
+            )}
+          </form>
+        </Card>
       )}
+
+      {actionError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {actionError}
+        </p>
+      )}
+
+      {expandedOrder && (
+        <Card
+          title={`${expandedOrder.order.doNo} — lines`}
+          description={expandedOrder.order.notes ?? undefined}
+          actions={
+            <Button size="sm" variant="ghost" onClick={() => setExpandedId(null)}>
+              Close
+            </Button>
+          }
+        >
+          {(linesById[expandedOrder.order.id] ?? []).length === 0 ? (
+            <p className="ui-muted" style={{ margin: 0 }}>
+              Loading lines…
+            </p>
+          ) : (
+            <ul className="ui-move-list">
+              {linesById[expandedOrder.order.id].map((l) => (
+                <li key={l.id}>
+                  {l.quantity} × {productLabel(l.productId)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
+
+      <Card flush>
+        <DataTable
+          caption="Delivery orders"
+          columns={columns}
+          rows={loadError ? [] : orders === null ? null : filtered}
+          rowKey={(x) => x.order.id}
+          onRowClick={(x) => void toggleExpand(x.order)}
+          selectedKey={expandedId}
+          empty={<div className="ui-table-state">No delivery orders in this view.</div>}
+        />
+      </Card>
     </div>
   );
 }

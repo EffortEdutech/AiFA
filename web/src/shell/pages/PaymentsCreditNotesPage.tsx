@@ -9,6 +9,9 @@
  * clear error rather than the form being silently hidden (Vol 12_2
  * §4.4 gates the sidebar item itself on `sales`, which is the coarser
  * of the two).
+ *
+ * UI polish Phase 4: presentation only — header with actions, labelled forms
+ * in cards, tables for the two lists. Same calls and gating.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -17,6 +20,7 @@ import type { PaymentMethod } from "@aifa/core/sync/paymentsCreditNotesTransport
 import type { Invoice } from "@aifa/core/sync/quotationInvoiceTransport";
 import type { Party } from "@aifa/core/sync/partyAndLedgerTransport";
 
+import { Button, Card, DataTable, Field, PageHeader, StatusPill, formatDate, formatMoney, humanizeStatus, type Column } from "../../ui";
 import { supabase } from "../../lib/supabaseClient";
 import { listParties } from "../../lib/partiesAndAccounts";
 import { listInvoices, listPayments, listCreditNotes } from "../../lib/salesCycle";
@@ -134,146 +138,179 @@ export function PaymentsCreditNotesPage({ businessId }: Props): JSX.Element {
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Payments & Credit Notes</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
+  const openInvoices = invoices.filter((i) => i.outstandingBalance > 0);
+
+  const invoiceSelect = (value: string, onChange: (v: string) => void) => (p: Parameters<Parameters<typeof Field>[0]["children"]>[0]) => (
+    <select {...p} className="ui-select" value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Select invoice…</option>
+      {openInvoices.map((i) => (
+        <option key={i.id} value={i.id}>
+          {invoiceLabel(i.id)}
+        </option>
+      ))}
+    </select>
+  );
+
+  const paymentColumns: Column<PaymentRecord>[] = [
+    { key: "inv", header: "Invoice", render: (pmt) => invoiceLabel(pmt.invoiceId) },
+    { key: "when", header: "Received", render: (pmt) => formatDate(pmt.receivedAt) },
+    { key: "method", header: "Method", render: (pmt) => humanizeStatus(pmt.method) },
+    { key: "ref", header: "Reference", render: (pmt) => pmt.reference ?? "—" },
+    { key: "amt", header: "Amount", numeric: true, render: (pmt) => formatMoney(pmt.amount) },
+  ];
+
+  const creditColumns: Column<CreditNoteRecord>[] = [
+    {
+      key: "cn",
+      header: "Credit note",
+      render: (cn) => (
+        <>
+          <strong>{cn.creditNoteNo}</strong>
+          <div className="ui-cell-sub">{invoiceLabel(cn.sourceInvoiceId)}</div>
+        </>
+      ),
+    },
+    { key: "status", header: "Status", render: (cn) => <StatusPill status={cn.status} /> },
+    { key: "issued", header: "Issued", render: (cn) => formatDate(cn.issueDate) },
+    { key: "reason", header: "Reason", render: (cn) => cn.reason ?? "—" },
+    { key: "amt", header: "Amount", numeric: true, render: (cn) => formatMoney(cn.grandTotal) },
+  ];
 
   return (
     <div className="aifa-page">
-      <h1>Payments & Credit Notes</h1>
-      <TabStrip
-        tabs={[
-          { id: "payments", label: "Payments", count: payments?.length },
-          { id: "credit-notes", label: "Credit Notes", count: creditNotes?.length },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
+      <PageHeader
+        title="Payments & Credit Notes"
+        actions={
+          tab === "payments" ? (
+            <Button variant="primary" icon={showPaymentForm ? undefined : "plus"} onClick={() => setShowPaymentForm((s) => !s)}>
+              {showPaymentForm ? "Cancel" : "Record payment"}
+            </Button>
+          ) : (
+            <Button variant="primary" icon={showCreditForm ? undefined : "plus"} onClick={() => setShowCreditForm((s) => !s)}>
+              {showCreditForm ? "Cancel" : "New credit note"}
+            </Button>
+          )
+        }
+      >
+        <TabStrip
+          tabs={[
+            { id: "payments", label: "Payments", count: payments?.length },
+            { id: "credit-notes", label: "Credit Notes", count: creditNotes?.length },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
+
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
 
       {tab === "payments" && (
         <>
-          <div className="row" style={{ margin: "12px 0" }}>
-            <button onClick={() => setShowPaymentForm((s) => !s)}>{showPaymentForm ? "Cancel" : "Record payment"}</button>
-          </div>
           {showPaymentForm && (
-            <div className="card">
-              <h2 style={{ fontSize: 16, marginTop: 0 }}>Record payment</h2>
-              <div className="row">
-                <select value={pInvoiceId} onChange={(e) => setPInvoiceId(e.target.value)} style={{ padding: 6, minWidth: 280 }}>
-                  <option value="">Select invoice…</option>
-                  {invoices
-                    .filter((i) => i.outstandingBalance > 0)
-                    .map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {invoiceLabel(i.id)}
-                      </option>
-                    ))}
-                </select>
-              </div>
-              <div className="row" style={{ marginTop: 8 }}>
-                <input placeholder="Amount (RM)" value={pAmount} onChange={(e) => setPAmount(e.target.value)} style={{ padding: 6, width: 140 }} />
-                <select value={pMethod} onChange={(e) => setPMethod(e.target.value as PaymentMethod)} style={{ padding: 6 }}>
-                  {PAYMENT_METHODS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  placeholder="Reference (optional)"
-                  value={pReference}
-                  onChange={(e) => setPReference(e.target.value)}
-                  style={{ padding: 6, flex: 1 }}
-                />
-              </div>
-              <div className="row" style={{ marginTop: 8 }}>
-                <button onClick={() => void handleRecordPayment()} disabled={pBusy || !pInvoiceId || !pAmount.trim()}>
-                  {pBusy ? "Recording…" : "Record payment"}
-                </button>
-              </div>
-              {pError && <p className="error">{pError}</p>}
-            </div>
-          )}
-          {payments === null ? (
-            <p className="muted">Loading…</p>
-          ) : payments.length === 0 ? (
-            <p className="muted">No payments recorded yet.</p>
-          ) : (
-            payments.map((pmt) => (
-              <div key={pmt.id} className="card">
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <strong>{invoiceLabel(pmt.invoiceId)}</strong>
-                  <span className="muted">{pmt.receivedAt}</span>
+            <Card title="Record payment">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!pBusy && pInvoiceId && pAmount.trim()) void handleRecordPayment();
+                }}
+              >
+                <div className="ui-form-grid">
+                  <Field label="Invoice" required>
+                    {invoiceSelect(pInvoiceId, setPInvoiceId)}
+                  </Field>
+                  <Field label="Amount (RM)" required>
+                    {(p) => <input {...p} className="ui-input" inputMode="decimal" value={pAmount} onChange={(e) => setPAmount(e.target.value)} />}
+                  </Field>
+                  <Field label="Method">
+                    {(p) => (
+                      <select {...p} className="ui-select" value={pMethod} onChange={(e) => setPMethod(e.target.value as PaymentMethod)}>
+                        {PAYMENT_METHODS.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </Field>
+                  <Field label="Reference (optional)">
+                    {(p) => <input {...p} className="ui-input" value={pReference} onChange={(e) => setPReference(e.target.value)} />}
+                  </Field>
                 </div>
-                <p className="muted" style={{ margin: "4px 0" }}>
-                  RM{pmt.amount.toFixed(2)} via {pmt.method}
-                  {pmt.reference && ` — ${pmt.reference}`}
-                </p>
-              </div>
-            ))
+                <div className="ui-form-actions">
+                  <Button type="submit" variant="primary" loading={pBusy} disabled={!pInvoiceId || !pAmount.trim()}>
+                    {pBusy ? "Recording…" : "Record payment"}
+                  </Button>
+                </div>
+                {pError && (
+                  <p className="aifa-alert aifa-alert--danger" role="alert">
+                    {pError}
+                  </p>
+                )}
+              </form>
+            </Card>
           )}
+          <Card flush>
+            <DataTable
+              caption="Recorded payments"
+              columns={paymentColumns}
+              rows={loadError ? [] : payments}
+              rowKey={(pmt) => pmt.id}
+              empty={<div className="ui-table-state">No payments recorded yet.</div>}
+            />
+          </Card>
         </>
       )}
 
       {tab === "credit-notes" && (
         <>
-          <div className="row" style={{ margin: "12px 0" }}>
-            <button onClick={() => setShowCreditForm((s) => !s)}>{showCreditForm ? "Cancel" : "New credit note"}</button>
-          </div>
           {showCreditForm && (
-            <div className="card">
-              <h2 style={{ fontSize: 16, marginTop: 0 }}>New credit note</h2>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Routes through the Approvals inbox — stays draft, and the invoice balance is untouched, until that task
-                resolves.
-              </p>
-              <div className="row">
-                <select value={cInvoiceId} onChange={(e) => setCInvoiceId(e.target.value)} style={{ padding: 6, minWidth: 280 }}>
-                  <option value="">Select invoice…</option>
-                  {invoices
-                    .filter((i) => i.outstandingBalance > 0)
-                    .map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {invoiceLabel(i.id)}
-                      </option>
-                    ))}
-                </select>
-              </div>
-              <div className="row" style={{ marginTop: 8 }}>
-                <input placeholder="Amount (RM)" value={cAmount} onChange={(e) => setCAmount(e.target.value)} style={{ padding: 6, width: 140 }} />
-                <input placeholder="Reason (optional)" value={cReason} onChange={(e) => setCReason(e.target.value)} style={{ padding: 6, flex: 1 }} />
-              </div>
-              <div className="row" style={{ marginTop: 8 }}>
-                <button onClick={() => void handleCreateCreditNote()} disabled={cBusy || !cInvoiceId || !cAmount.trim()}>
-                  {cBusy ? "Creating…" : "Create credit note"}
-                </button>
-              </div>
-              {cError && <p className="error">{cError}</p>}
-            </div>
-          )}
-          {creditNotes === null ? (
-            <p className="muted">Loading…</p>
-          ) : creditNotes.length === 0 ? (
-            <p className="muted">No credit notes yet.</p>
-          ) : (
-            creditNotes.map((cn) => (
-              <div key={cn.id} className="card">
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <strong>{cn.creditNoteNo} — {invoiceLabel(cn.sourceInvoiceId)}</strong>
-                  <span className="muted">{cn.status}</span>
+            <Card
+              title="New credit note"
+              description="Routes through the Approvals inbox — stays draft, and the invoice balance is untouched, until that task resolves."
+            >
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!cBusy && cInvoiceId && cAmount.trim()) void handleCreateCreditNote();
+                }}
+              >
+                <div className="ui-form-grid">
+                  <Field label="Invoice" required>
+                    {invoiceSelect(cInvoiceId, setCInvoiceId)}
+                  </Field>
+                  <Field label="Amount (RM)" required>
+                    {(p) => <input {...p} className="ui-input" inputMode="decimal" value={cAmount} onChange={(e) => setCAmount(e.target.value)} />}
+                  </Field>
+                  <Field label="Reason (optional)">
+                    {(p) => <input {...p} className="ui-input" value={cReason} onChange={(e) => setCReason(e.target.value)} />}
+                  </Field>
                 </div>
-                <p className="muted" style={{ margin: "4px 0" }}>
-                  RM{cn.grandTotal.toFixed(2)} · issued {cn.issueDate}
-                  {cn.reason && ` — ${cn.reason}`}
-                </p>
-              </div>
-            ))
+                <div className="ui-form-actions">
+                  <Button type="submit" variant="primary" loading={cBusy} disabled={!cInvoiceId || !cAmount.trim()}>
+                    {cBusy ? "Creating…" : "Create credit note"}
+                  </Button>
+                </div>
+                {cError && (
+                  <p className="aifa-alert aifa-alert--danger" role="alert">
+                    {cError}
+                  </p>
+                )}
+              </form>
+            </Card>
           )}
+          <Card flush>
+            <DataTable
+              caption="Credit notes"
+              columns={creditColumns}
+              rows={loadError ? [] : creditNotes}
+              rowKey={(cn) => cn.id}
+              empty={<div className="ui-table-state">No credit notes yet.</div>}
+            />
+          </Card>
         </>
       )}
     </div>
