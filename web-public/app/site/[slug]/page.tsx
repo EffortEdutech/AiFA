@@ -12,9 +12,18 @@
 // public-homepage/index.ts which uses a service_role client and never
 // hit this. The RPC is a narrow, SECURITY DEFINER exception scoped to
 // just legal_name, same pattern as resolve_business_slug().
+//
+// UI polish Phase 5 (October 2026): presentation only -- same data, same
+// RPCs, same fields. Adds a sticky navigation with anchors, a stronger hero
+// with calls to action, text colours computed from the owner's accent
+// (lib/color.ts), email/phone/WhatsApp links (lib/contact.ts), a designed
+// "not published yet" page, page metadata, and drops the About section that
+// only repeated the hero text.
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
+import { buildTheme } from "../../../lib/color";
+import { emailHref, telHref, whatsAppHref } from "../../../lib/contact";
 import { getPublicSupabaseClient } from "../../../lib/supabasePublic";
 import { ContactForm } from "./ContactForm";
 
@@ -61,13 +70,34 @@ async function loadSite(slug: string): Promise<Site | null> {
   };
 }
 
+function shorten(text: string, max: number): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length <= max ? clean : `${clean.slice(0, max - 1).trimEnd()}…`;
+}
+
 export async function generateMetadata({
   params,
 }: {
   params: { slug: string };
 }): Promise<Metadata> {
   const site = await loadSite(params.slug);
-  return { title: site?.businessName ?? "AiFA" };
+  if (!site) return { title: "Page not found", robots: { index: false } };
+
+  const name = site.businessName;
+  if (!site.content) {
+    // Nothing published yet: keep search engines away until there is a real page.
+    return { title: name, robots: { index: false, follow: false } };
+  }
+
+  const description = shorten(
+    site.content.hero_subtext || `${name} — services and contact details.`,
+    160,
+  );
+  return {
+    title: name,
+    description,
+    openGraph: { title: name, description, type: "website" },
+  };
 }
 
 export default async function BusinessSitePage({
@@ -79,95 +109,171 @@ export default async function BusinessSitePage({
   if (!site) notFound();
 
   const { businessId, businessName, content } = site;
-  const accent = content?.accent_color || "#1a2b3c";
-  const headline = content?.hero_headline || businessName;
-  const subtext = content?.hero_subtext || "";
-  const services = content?.services || [];
-  const email = content?.contact_email || "";
-  const phone = content?.contact_phone || "";
 
   if (!content) {
     return (
-      <main style={{ padding: 48, maxWidth: 640, margin: "0 auto" }}>
-        <h1>{businessName}</h1>
-        <p>This site has not published any content yet.</p>
+      <main className="site-message">
+        <div className="site-message__panel">
+          <div className="site-message__mark" aria-hidden="true">
+            {businessName.trim().charAt(0).toUpperCase() || "A"}
+          </div>
+          <h1 className="site-message__title">{businessName}</h1>
+          <p className="site-message__text">
+            This site has not published any content yet. Please check back soon.
+          </p>
+          <p className="site-message__foot">Powered by AiFA</p>
+        </div>
       </main>
     );
   }
 
+  const theme = buildTheme(content.accent_color);
+  const headline = content.hero_headline || businessName;
+  const subtext = content.hero_subtext || "";
+  const services = content.services || [];
+  const email = (content.contact_email || "").trim();
+  const phone = (content.contact_phone || "").trim();
+
+  const mailLink = email ? emailHref(email) : null;
+  const callLink = phone ? telHref(phone) : null;
+  const whatsAppLink = phone ? whatsAppHref(phone) : null;
+  const hasContactDetails = Boolean(email || phone);
+
+  const themeVars = {
+    "--accent": theme.accent,
+    "--on-accent": theme.onAccent,
+    "--accent-text": theme.accentText,
+    "--accent-tint": theme.accentTint,
+    "--hero-btn-bg": theme.heroButtonBg,
+    "--hero-btn-text": theme.heroButtonText,
+  } as React.CSSProperties;
+
   return (
-    <div style={{ "--accent": accent } as React.CSSProperties}>
-      <nav
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "16px 24px",
-          borderBottom: "1px solid #eee",
-        }}
-      >
-        <span style={{ fontWeight: 700, fontSize: 18 }}>{businessName}</span>
-      </nav>
+    <div className="site" style={themeVars}>
+      <a className="site-skip" href="#main">
+        Skip to content
+      </a>
 
-      <div
-        style={{
-          padding: "64px 24px",
-          background: accent,
-          color: "#fff",
-          textAlign: "center",
-        }}
-      >
-        <h1 style={{ margin: "0 0 12px", fontSize: 32 }}>{headline}</h1>
-        {subtext && <p style={{ margin: 0, fontSize: 18, opacity: 0.9 }}>{subtext}</p>}
-      </div>
-
-      <section style={{ padding: "48px 24px", maxWidth: 960, margin: "0 auto" }}>
-        <h2>Services</h2>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 16,
-          }}
-        >
-          {services.length > 0 ? (
-            services.map((s, i) => (
-              <div
-                key={i}
-                style={{ border: "1px solid #eee", borderRadius: 8, padding: 20 }}
-              >
-                <h3 style={{ marginTop: 0, color: accent }}>{s.name}</h3>
-                <p>{s.description}</p>
-              </div>
-            ))
-          ) : (
-            <p>Services coming soon.</p>
-          )}
+      <header className="site-nav">
+        <div className="site-wrap site-nav__inner">
+          <a className="site-nav__brand" href="#top">
+            {businessName}
+          </a>
+          <nav className="site-nav__links" aria-label="Sections">
+            <a className="site-nav__link" href="#services">
+              Services
+            </a>
+            <a className="site-nav__link" href="#contact">
+              Contact
+            </a>
+          </nav>
         </div>
-      </section>
+      </header>
 
-      <section style={{ padding: "48px 24px", maxWidth: 960, margin: "0 auto" }}>
-        <h2>About</h2>
-        <p>{subtext || `${businessName} is on AiFA.`}</p>
-      </section>
+      <main id="main">
+        <section className="site-hero" id="top">
+          <div className="site-wrap">
+            <h1 className="site-hero__title">{headline}</h1>
+            {subtext && <p className="site-hero__sub">{subtext}</p>}
+            <div className="site-hero__actions">
+              <a className="site-btn site-btn--hero" href="#contact">
+                Get in touch
+              </a>
+              {whatsAppLink ? (
+                <a
+                  className="site-btn site-btn--hero-outline"
+                  href={whatsAppLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  WhatsApp us
+                </a>
+              ) : callLink ? (
+                <a className="site-btn site-btn--hero-outline" href={callLink}>
+                  Call us
+                </a>
+              ) : null}
+            </div>
+          </div>
+        </section>
 
-      <section style={{ padding: "48px 24px", maxWidth: 960, margin: "0 auto" }}>
-        <h2>Contact</h2>
-        {email && <p>Email: {email}</p>}
-        {phone && <p>Phone: {phone}</p>}
-        <ContactForm businessId={businessId} />
-      </section>
+        <section className="site-section" id="services" aria-labelledby="services-title">
+          <div className="site-wrap">
+            <h2 className="site-section__title" id="services-title">
+              Services
+            </h2>
+            {services.length > 0 ? (
+              <div className="site-grid">
+                {services.map((s, i) => (
+                  <article className="site-card" key={i}>
+                    <h3 className="site-card__title">{s.name}</h3>
+                    {s.description && <p className="site-card__text">{s.description}</p>}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="site-empty-note">Services coming soon.</p>
+            )}
+          </div>
+        </section>
 
-      <footer
-        style={{
-          padding: 24,
-          textAlign: "center",
-          color: "#777",
-          fontSize: 13,
-          borderTop: "1px solid #eee",
-        }}
-      >
-        Powered by AiFA
+        <section
+          className="site-section site-section--tint"
+          id="contact"
+          aria-labelledby="contact-title"
+        >
+          <div className="site-wrap">
+            <h2 className="site-section__title" id="contact-title">
+              Contact
+            </h2>
+            <p className="site-section__lead">
+              Send us a message and we&apos;ll get back to you
+              {hasContactDetails ? ", or reach us directly." : "."}
+            </p>
+            <div className="site-contact">
+              {hasContactDetails && (
+                <ul className="site-contact__list">
+                  {email && (
+                    <li className="site-contact__item">
+                      <span className="site-contact__label">Email</span>
+                      <span className="site-contact__value">
+                        {mailLink ? <a href={mailLink}>{email}</a> : email}
+                      </span>
+                    </li>
+                  )}
+                  {phone && (
+                    <li className="site-contact__item">
+                      <span className="site-contact__label">Phone</span>
+                      <span className="site-contact__value">
+                        {callLink ? <a href={callLink}>{phone}</a> : phone}
+                      </span>
+                    </li>
+                  )}
+                  {whatsAppLink && (
+                    <li className="site-contact__item">
+                      <span className="site-contact__label">WhatsApp</span>
+                      <span className="site-contact__value">
+                        <a href={whatsAppLink} target="_blank" rel="noopener noreferrer">
+                          Chat on WhatsApp
+                        </a>
+                      </span>
+                    </li>
+                  )}
+                </ul>
+              )}
+              <ContactForm businessId={businessId} />
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer className="site-footer">
+        <div className="site-wrap site-footer__inner">
+          <span>
+            &copy; {new Date().getFullYear()} {businessName}
+          </span>
+          <span>Powered by AiFA</span>
+        </div>
       </footer>
     </div>
   );

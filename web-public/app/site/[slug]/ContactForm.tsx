@@ -5,16 +5,22 @@
 // submit_public_request() RPC -- same destination the original
 // public-homepage edge function's inline <script> posted to, just moved
 // into a real React component now that this app owns the page.
+//
+// UI polish Phase 5: labelled fields, a visible success/error message that
+// screen readers announce, and the shared site styles. The request body and
+// endpoint are unchanged.
 import { useState } from "react";
 
+type Status = { kind: "idle" } | { kind: "ok"; text: string } | { kind: "error"; text: string };
+
 export function ContactForm({ businessId }: { businessId: string }) {
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [busy, setBusy] = useState(false);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
-    setStatus("Sending…");
+    setStatus({ kind: "idle" });
     const form = e.currentTarget;
     const fd = new FormData(form);
     try {
@@ -29,46 +35,69 @@ export function ContactForm({ businessId }: { businessId: string }) {
         }),
       });
       if (!res.ok) throw new Error("failed");
-      setStatus("Thanks — we'll be in touch.");
+      setStatus({ kind: "ok", text: "Thanks — we'll be in touch." });
       form.reset();
     } catch {
-      setStatus("Could not send — please try again.");
+      setStatus({ kind: "error", text: "Could not send — please try again." });
     } finally {
       setBusy(false);
     }
   }
 
-  const inputStyle: React.CSSProperties = {
-    padding: 10,
-    border: "1px solid #ccc",
-    borderRadius: 6,
-    font: "inherit",
-  };
-
   return (
-    <form
-      onSubmit={handleSubmit}
-      style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 480 }}
-    >
-      <input name="name" placeholder="Your name" required style={inputStyle} />
-      <input name="email" type="email" placeholder="Your email" required style={inputStyle} />
-      <textarea name="message" placeholder="Message" rows={4} required style={inputStyle} />
-      <button
-        type="submit"
-        disabled={busy}
-        style={{
-          padding: "10px 20px",
-          background: "var(--accent)",
-          color: "#fff",
-          border: "none",
-          borderRadius: 6,
-          cursor: busy ? "default" : "pointer",
-          opacity: busy ? 0.7 : 1,
-        }}
-      >
-        {busy ? "Sending…" : "Send"}
+    <form className="site-form" onSubmit={handleSubmit}>
+      <div className="site-form__field">
+        <label className="site-form__label" htmlFor="contact-name">
+          Your name
+        </label>
+        <input
+          id="contact-name"
+          name="name"
+          className="site-form__input"
+          autoComplete="name"
+          required
+        />
+      </div>
+      <div className="site-form__field">
+        <label className="site-form__label" htmlFor="contact-email">
+          Your email
+        </label>
+        <input
+          id="contact-email"
+          name="email"
+          type="email"
+          className="site-form__input"
+          autoComplete="email"
+          required
+        />
+      </div>
+      <div className="site-form__field">
+        <label className="site-form__label" htmlFor="contact-message">
+          Message
+        </label>
+        <textarea
+          id="contact-message"
+          name="message"
+          rows={5}
+          className="site-form__input"
+          required
+        />
+      </div>
+      <button type="submit" className="site-btn site-btn--solid" disabled={busy} aria-busy={busy}>
+        {busy ? "Sending…" : "Send message"}
       </button>
-      <p style={{ fontSize: 14 }}>{status}</p>
+      <div aria-live="polite">
+        {status.kind === "ok" && (
+          <p className="site-form__status site-form__status--ok" role="status">
+            {status.text}
+          </p>
+        )}
+        {status.kind === "error" && (
+          <p className="site-form__status site-form__status--error" role="alert">
+            {status.text}
+          </p>
+        )}
+      </div>
     </form>
   );
 }

@@ -1,6 +1,10 @@
-export const metadata = {
+import type { Metadata } from "next";
+
+import "./globals.css";
+
+export const metadata: Metadata = {
   title: "AiFA",
-  description: "AiFA-hosted public site",
+  description: "Websites for businesses hosted on AiFA.",
 };
 
 export default function RootLayout({
@@ -10,9 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body style={{ margin: 0, fontFamily: "system-ui, -apple-system, sans-serif" }}>
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
