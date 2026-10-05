@@ -16,8 +16,13 @@
  * (that's the Commission page's own job); it only surfaces what's
  * already there, so an invoice's detail view doesn't silently omit
  * commission context that exists elsewhere in the app.
+ *
+ * UI polish Phase 3 (pilot page): presentation only — one table instead
+ * of a card per invoice, and the invoice's detail opens in a panel above
+ * the table instead of expanding in place. Same reads, same effective
+ * status logic, same detail contents.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createSupabasePaymentsCreditNotesTransport } from "@aifa/core/sync/paymentsCreditNotesTransport";
 import type { InvoiceEffectiveStatus } from "@aifa/core/sync/paymentsCreditNotesTransport";
@@ -36,6 +41,19 @@ import type { SalesLine } from "../../lib/salesCycle";
 import type { Payment, CreditNote } from "@aifa/core/sync/paymentsCreditNotesTransport";
 import type { CommissionCalculation } from "@aifa/core/sync/attendanceLeaveCommissionTransport";
 import { listCommissionCalculations, listInvoiceAgentAssignments } from "../../lib/attendanceLeaveCommission";
+import {
+  Button,
+  Card,
+  DataTable,
+  EmptyState,
+  PageHeader,
+  SkeletonLines,
+  StatusPill,
+  formatDate,
+  formatMoney,
+  humanizeStatus,
+  type Column,
+} from "../../ui";
 import { TabStrip } from "../TabStrip";
 
 const paymentsCreditNotesTransport = createSupabasePaymentsCreditNotesTransport(supabase);
@@ -54,6 +72,11 @@ interface DetailState {
   commission: CommissionCalculation | null;
 }
 
+/** Money in the invoice's own currency; MYR uses the console's RM format. */
+function money(currency: string, amount: number): string {
+  return currency === "MYR" || currency === "RM" ? formatMoney(amount) : `${currency} ${amount.toFixed(2)}`;
+}
+
 export function InvoicesPage({ businessId }: Props): JSX.Element {
   const [invoices, setInvoices] = useState<Invoice[] | null>(null);
   const [parties, setParties] = useState<Party[]>([]);
@@ -63,8 +86,10 @@ export function InvoicesPage({ businessId }: Props): JSX.Element {
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detailById, setDetailById] = useState<Record<string, DetailState>>({});
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [agentByInvoiceId, setAgentByInvoiceId] = useState<Record<string, string | null>>({});
   const [commissionByInvoiceId, setCommissionByInvoiceId] = useState<Record<string, CommissionCalculation>>({});
+  const detailRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -92,6 +117,11 @@ export function InvoicesPage({ businessId }: Props): JSX.Element {
     load().catch(() => {});
   }, [load]);
 
+  // Bring the detail panel into view when it opens, even from far down a long list.
+  useEffect(() => {
+    if (expandedId) detailRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [expandedId]);
+
   function partyName(id: string): string {
     return parties.find((p) => p.id === id)?.displayName ?? `Party #${id.slice(0, 8)}`;
   }
@@ -102,6 +132,7 @@ export function InvoicesPage({ businessId }: Props): JSX.Element {
       return;
     }
     setExpandedId(inv.id);
+    setDetailError(null);
     if (!detailById[inv.id]) {
       try {
         const [lines, payments, creditNotes] = await Promise.all([
@@ -120,119 +151,153 @@ export function InvoicesPage({ businessId }: Props): JSX.Element {
           },
         }));
       } catch {
-        // detail is a nice-to-have on expand; leave silently empty on failure
+        setDetailError("Could not load this invoice's detail. Select it again to retry.");
       }
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Invoices</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
-
   const effectiveOf = (inv: Invoice): InvoiceEffectiveStatus => effectiveById[inv.id] ?? inv.status;
-  const filtered = (invoices ?? []).filter((i) => tab === "all" || effectiveOf(i) === tab);
+  const filtered = invoices === null ? null : invoices.filter((i) => tab === "all" || effectiveOf(i) === tab);
   const counts = (status: InvoiceEffectiveStatus) => (invoices ?? []).filter((i) => effectiveOf(i) === status).length;
 
-  return (
-    <div className="aifa-page">
-      <h1>Invoices</h1>
-      <TabStrip
-        tabs={[
-          { id: "all", label: "All", count: invoices?.length },
-          { id: "issued", label: "Issued", count: counts("issued") },
-          { id: "sent", label: "Sent", count: counts("sent") },
-          { id: "overdue", label: "Overdue", count: counts("overdue") },
-          { id: "partially_paid", label: "Partially Paid", count: counts("partially_paid") },
-          { id: "paid", label: "Paid", count: counts("paid") },
-          { id: "cancelled", label: "Cancelled", count: counts("cancelled") },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
+  const columns: Column<Invoice>[] = [
+    {
+      key: "no",
+      header: "Invoice",
+      render: (i) => (
+        <>
+          <strong>{i.invoiceNo}</strong>
+          <span className="ui-cell-sub">{partyName(i.partyId)}</span>
+        </>
+      ),
+    },
+    { key: "status", header: "Status", render: (i) => <StatusPill status={effectiveOf(i)} /> },
+    { key: "total", header: "Total", numeric: true, render: (i) => money(i.currency, i.grandTotal) },
+    { key: "due", header: "Due", render: (i) => formatDate(i.dueDate) },
+    { key: "outstanding", header: "Outstanding", numeric: true, render: (i) => money(i.currency, i.outstandingBalance) },
+    {
+      key: "einvoice",
+      header: "e-Invoice",
+      render: (i) => (i.eInvoiceStatus !== "not_applicable" ? <StatusPill status={i.eInvoiceStatus} /> : "—"),
+    },
+  ];
 
-      {invoices === null ? (
-        <p className="muted">Loading…</p>
-      ) : filtered.length === 0 ? (
-        <p className="muted">No invoices in this view.</p>
-      ) : (
-        filtered.map((inv) => {
-          const expanded = expandedId === inv.id;
-          const detail = detailById[inv.id];
-          const eff = effectiveOf(inv);
-          return (
-            <div key={inv.id} className="card">
-              <div className="row" style={{ justifyContent: "space-between", cursor: "pointer" }} onClick={() => void toggleExpand(inv)}>
-                <strong>
-                  {inv.invoiceNo} — {partyName(inv.partyId)}
-                </strong>
-                <span className="muted" style={eff === "overdue" ? { color: "#c0392b", fontWeight: 600 } : undefined}>
-                  {eff}
-                </span>
-              </div>
-              <p className="muted" style={{ margin: "4px 0" }}>
-                {inv.currency} {inv.grandTotal.toFixed(2)} · due {inv.dueDate} · outstanding {inv.currency}{" "}
-                {inv.outstandingBalance.toFixed(2)}
-                {inv.eInvoiceStatus !== "not_applicable" && ` · e-Invoice: ${inv.eInvoiceStatus}`}
+  const expandedInvoice = expandedId ? (invoices ?? []).find((i) => i.id === expandedId) ?? null : null;
+  const detail = expandedInvoice ? detailById[expandedInvoice.id] : undefined;
+
+  return (
+    <div className="ui-page">
+      <PageHeader title="Invoices" description="Invoices issued to customers, with their payments and credit notes.">
+        <TabStrip
+          tabs={[
+            { id: "all", label: "All", count: invoices?.length },
+            { id: "issued", label: "Issued", count: counts("issued") },
+            { id: "sent", label: "Sent", count: counts("sent") },
+            { id: "overdue", label: "Overdue", count: counts("overdue") },
+            { id: "partially_paid", label: "Partially Paid", count: counts("partially_paid") },
+            { id: "paid", label: "Paid", count: counts("paid") },
+            { id: "cancelled", label: "Cancelled", count: counts("cancelled") },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
+
+      {expandedInvoice && (
+        <div ref={detailRef}>
+          <Card
+            title={`${expandedInvoice.invoiceNo} — ${partyName(expandedInvoice.partyId)}`}
+            description="Invoice detail"
+            actions={
+              <Button size="sm" variant="secondary" icon="x" onClick={() => setExpandedId(null)}>
+                Close
+              </Button>
+            }
+          >
+            {detailError ? (
+              <p className="aifa-alert aifa-alert--danger" role="alert">
+                {detailError}
               </p>
-              {expanded && (
-                <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--aifa-border, #e2e2e2)" }}>
-                  {!detail ? (
-                    <p className="muted">Loading detail…</p>
-                  ) : (
-                    <>
-                      <p style={{ fontWeight: 600, margin: "4px 0" }}>Lines</p>
-                      {detail.lines.length === 0 ? (
-                        <p className="muted">No lines.</p>
-                      ) : (
-                        detail.lines.map((l) => (
-                          <p key={l.id} className="muted" style={{ margin: "2px 0" }}>
-                            {l.quantity} × {l.description} @ RM{l.unitPrice.toFixed(2)} = RM{l.lineTotal.toFixed(2)}
-                          </p>
-                        ))
-                      )}
-                      <p style={{ fontWeight: 600, margin: "8px 0 4px" }}>Payments</p>
-                      {detail.payments.length === 0 ? (
-                        <p className="muted">No payments recorded yet.</p>
-                      ) : (
-                        detail.payments.map((pmt) => (
-                          <p key={pmt.id} className="muted" style={{ margin: "2px 0" }}>
-                            RM{pmt.amount.toFixed(2)} via {pmt.method} on {pmt.receivedAt}
-                            {pmt.reference && ` (${pmt.reference})`}
-                          </p>
-                        ))
-                      )}
-                      <p style={{ fontWeight: 600, margin: "8px 0 4px" }}>Credit Notes</p>
-                      {detail.creditNotes.length === 0 ? (
-                        <p className="muted">None.</p>
-                      ) : (
-                        detail.creditNotes.map((cn) => (
-                          <p key={cn.id} className="muted" style={{ margin: "2px 0" }}>
-                            {cn.creditNoteNo} — RM{cn.grandTotal.toFixed(2)} · {cn.status}
-                            {cn.reason && ` — ${cn.reason}`}
-                          </p>
-                        ))
-                      )}
-                      <p style={{ fontWeight: 600, margin: "8px 0 4px" }}>Agent &amp; Commission</p>
-                      <p className="muted" style={{ margin: "2px 0" }}>
-                        {detail.agentPartyId ? `Agent #${detail.agentPartyId.slice(0, 8)}` : "No agent assigned"}
-                        {detail.commission && ` · commission RM${detail.commission.amount.toFixed(2)} (${detail.commission.status})`}
-                      </p>
-                      <p className="muted" style={{ margin: "2px 0" }}>
-                        Assign an agent or compute commission from the Commission page.
-                      </p>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })
+            ) : !detail ? (
+              <SkeletonLines lines={4} />
+            ) : (
+              <>
+                <h3 className="ui-section-title">Lines</h3>
+                <DataTable
+                  caption="Invoice lines"
+                  rows={detail.lines}
+                  rowKey={(l) => l.id}
+                  empty={<div className="ui-table-state">No lines.</div>}
+                  columns={[
+                    { key: "qty", header: "Qty", numeric: true, width: 70, render: (l) => l.quantity },
+                    { key: "desc", header: "Description", render: (l) => l.description },
+                    { key: "price", header: "Unit price", numeric: true, render: (l) => formatMoney(l.unitPrice) },
+                    { key: "total", header: "Line total", numeric: true, render: (l) => formatMoney(l.lineTotal) },
+                  ]}
+                />
+
+                <h3 className="ui-section-title">Payments</h3>
+                <DataTable
+                  caption="Payments received"
+                  rows={detail.payments}
+                  rowKey={(p) => p.id}
+                  empty={<div className="ui-table-state">No payments recorded yet.</div>}
+                  columns={[
+                    { key: "date", header: "Received", render: (p) => formatDate(p.receivedAt) },
+                    { key: "method", header: "Method", render: (p) => humanizeStatus(p.method) },
+                    { key: "ref", header: "Reference", render: (p) => p.reference ?? "—" },
+                    { key: "amount", header: "Amount", numeric: true, render: (p) => formatMoney(p.amount) },
+                  ]}
+                />
+
+                <h3 className="ui-section-title">Credit notes</h3>
+                <DataTable
+                  caption="Credit notes"
+                  rows={detail.creditNotes}
+                  rowKey={(c) => c.id}
+                  empty={<div className="ui-table-state">None.</div>}
+                  columns={[
+                    { key: "no", header: "Credit note", render: (c) => c.creditNoteNo },
+                    { key: "status", header: "Status", render: (c) => <StatusPill status={c.status} /> },
+                    { key: "reason", header: "Reason", render: (c) => c.reason ?? "—" },
+                    { key: "total", header: "Total", numeric: true, render: (c) => formatMoney(c.grandTotal) },
+                  ]}
+                />
+
+                <h3 className="ui-section-title">Agent &amp; commission</h3>
+                <p style={{ margin: 0 }}>
+                  {detail.agentPartyId ? `Agent #${detail.agentPartyId.slice(0, 8)}` : "No agent assigned"}
+                  {detail.commission && ` · commission ${formatMoney(detail.commission.amount)} (${humanizeStatus(detail.commission.status)})`}
+                </p>
+                <p className="ui-note">Assign an agent or compute commission from the Commission page.</p>
+              </>
+            )}
+          </Card>
+        </div>
       )}
+
+      <Card flush>
+        <DataTable
+          caption="Invoices"
+          columns={columns}
+          rows={filtered}
+          rowKey={(i) => i.id}
+          error={loadError}
+          selectedKey={expandedId}
+          onRowClick={(inv) => void toggleExpand(inv)}
+          empty={
+            <EmptyState
+              icon="receipt"
+              title={tab === "all" ? "No invoices yet" : "No invoices in this view"}
+              description={
+                tab === "all"
+                  ? "Invoices you issue will appear here."
+                  : "Try another status tab."
+              }
+            />
+          }
+        />
+      </Card>
     </div>
   );
 }

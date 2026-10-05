@@ -22,6 +22,9 @@
  * click-to-chat link; the owner still taps Send inside WhatsApp —
  * AiFA never sends anything itself (same rule as the Quotation send
  * flow, owner's Sprint 21 choice).
+ *
+ * UI polish Phase 3: presentation only — shared card, buttons and fields;
+ * ranking, loading, partial-data note and the WhatsApp rule are unchanged.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -42,6 +45,7 @@ import { listCaptureTriage } from "../../lib/captureTriage";
 import { listParties } from "../../lib/partiesAndAccounts";
 import { listPaymentVouchers } from "../../lib/purchasesAndCash";
 import { supabase } from "../../lib/supabaseClient";
+import { Button, Card, Field, SkeletonLines } from "../../ui";
 import { SIDEBAR_ITEMS_BY_ID } from "../sidebarConfig";
 
 const fullAccountingReportsTransport = createSupabaseFullAccountingReportsTransport(supabase);
@@ -94,28 +98,32 @@ export function TodayMoneyMovesTab({ businessId, onNavigate }: Props): JSX.Eleme
   }, [load]);
 
   if (loaded === null) {
-    return <p className="muted">Working out today&apos;s money moves…</p>;
+    return (
+      <Card title="Money Moves — what to do next" description="Working out today's money moves…">
+        <SkeletonLines lines={3} />
+      </Card>
+    );
   }
 
   const { feed, failedSources, partyPhones } = loaded;
 
   return (
-    <div className="card">
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
-        <strong>Money Moves — what to do next</strong>
-        <button onClick={() => void load()} disabled={loading} style={{ padding: "0 6px" }}>
+    <Card
+      title="Money Moves — what to do next"
+      actions={
+        <Button size="sm" variant="secondary" icon="zap" loading={loading} onClick={() => void load()}>
           {loading ? "Refreshing…" : "Refresh"}
-        </button>
-      </div>
-
+        </Button>
+      }
+    >
       {feed.actions.length === 0 ? (
-        <p className="muted" style={{ margin: "8px 0" }}>
+        <p className="ui-muted" style={{ margin: 0 }}>
           {failedSources.length === 0
             ? "Nothing needs your attention right now."
             : "Nothing found in the data that loaded — see below for what could not be checked."}
         </p>
       ) : (
-        <ol style={{ margin: "8px 0", paddingLeft: 20 }}>
+        <ol className="ui-move-list">
           {feed.actions.map((a) => (
             <MoneyMoveItem
               key={a.id}
@@ -130,16 +138,16 @@ export function TodayMoneyMovesTab({ businessId, onNavigate }: Props): JSX.Eleme
       )}
 
       {feed.totalCandidates > feed.actions.length && (
-        <p className="muted" style={{ fontSize: 12, margin: "4px 0" }}>
+        <p className="ui-note">
           Showing the top {feed.actions.length} of {feed.totalCandidates}.
         </p>
       )}
       {failedSources.length > 0 && (
-        <p className="muted" style={{ fontSize: 12, margin: "4px 0" }}>
+        <p className="ui-note">
           Could not check: {failedSources.join(", ")} (no access for your role, or the read failed).
         </p>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -158,21 +166,19 @@ function MoneyMoveItem({
 }): JSX.Element {
   const target = SIDEBAR_ITEMS_BY_ID[action.targetPage];
   return (
-    <li style={{ marginBottom: 10 }}>
-      <div style={{ fontWeight: 600 }}>{action.title}</div>
-      <div className="muted" style={{ fontSize: 13 }}>
-        Why: {action.why}
-      </div>
-      <div className="row" style={{ gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+    <li className="ui-move">
+      <div className="ui-move__title">{action.title}</div>
+      <div className="ui-move__why">Why: {action.why}</div>
+      <div className="ui-inline-actions">
         {action.invoice && (
-          <button onClick={onToggleReminder} aria-expanded={reminderOpen} style={{ padding: "0 6px" }}>
+          <Button size="sm" variant="secondary" onClick={onToggleReminder} aria-expanded={reminderOpen}>
             {reminderOpen ? "Close reminder" : "Draft reminder"}
-          </button>
+          </Button>
         )}
         {onNavigate && target && (
-          <button onClick={() => onNavigate(action.targetPage)} style={{ padding: "0 6px" }}>
+          <Button size="sm" variant="secondary" onClick={() => onNavigate(action.targetPage)}>
             Go to {target.label}
-          </button>
+          </Button>
         )}
       </div>
       {reminderOpen && action.invoice && <ReminderPanel invoice={action.invoice} partyPhone={partyPhone} />}
@@ -202,42 +208,46 @@ function ReminderPanel({ invoice, partyPhone }: { invoice: OverdueInvoiceRef; pa
   }
 
   return (
-    <div style={{ marginTop: 6, padding: 8, border: "1px solid var(--aifa-border, #ddd)", borderRadius: 6 }}>
-      <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <span className="muted" style={{ fontSize: 12 }}>
-          Language:
-        </span>
-        <button onClick={() => switchLanguage("en")} aria-pressed={language === "en"} style={{ padding: "0 6px" }}>
+    <div className="ui-panel">
+      <div className="ui-inline-actions" role="group" aria-label="Reminder language">
+        <span className="ui-muted">Language:</span>
+        <Button size="sm" variant="secondary" onClick={() => switchLanguage("en")} aria-pressed={language === "en"}>
           English
-        </button>
-        <button onClick={() => switchLanguage("ms")} aria-pressed={language === "ms"} style={{ padding: "0 6px" }}>
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => switchLanguage("ms")} aria-pressed={language === "ms"}>
           Bahasa Melayu
-        </button>
+        </Button>
       </div>
-      <label className="muted" style={{ display: "block", fontSize: 12, marginTop: 6 }}>
-        Message (edit before sending)
-        <textarea
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            setCopied(false);
-          }}
-          rows={7}
-          style={{ display: "block", width: "100%", marginTop: 4 }}
-        />
-      </label>
-      <div className="row" style={{ gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-        <button
+      <div style={{ marginTop: "var(--aifa-space-3)" }}>
+        <Field label="Message (edit before sending)">
+          {(p) => (
+            <textarea
+              {...p}
+              className="ui-textarea"
+              value={text}
+              onChange={(e) => {
+                setText(e.target.value);
+                setCopied(false);
+              }}
+              rows={7}
+            />
+          )}
+        </Field>
+      </div>
+      <div className="ui-inline-actions" style={{ marginTop: "var(--aifa-space-3)" }}>
+        <Button
+          size="sm"
+          variant="primary"
+          icon="send"
           onClick={() => window.open(buildWhatsAppLink(phone, text), "_blank", "noopener,noreferrer")}
-          style={{ padding: "0 6px" }}
         >
           Open WhatsApp
-        </button>
-        <button onClick={() => void copy()} style={{ padding: "0 6px" }}>
+        </Button>
+        <Button size="sm" variant="secondary" icon={copied ? "check" : undefined} onClick={() => void copy()}>
           {copied ? "Copied" : "Copy text"}
-        </button>
+        </Button>
       </div>
-      <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
+      <p className="ui-note">
         {phone
           ? `Opens a chat with ${invoice.partyName ?? "this customer"} (+${phone}). Nothing is sent until you tap Send in WhatsApp.`
           : "No valid phone number on file for this customer — WhatsApp will ask you to pick the contact. Nothing is sent until you tap Send."}

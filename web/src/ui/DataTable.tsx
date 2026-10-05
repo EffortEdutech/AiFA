@@ -23,6 +23,8 @@ interface DataTableProps<T> {
   /** Load error message; replaces the table when set. */
   error?: string | null;
   onRowClick?: (row: T) => void;
+  /** `rowKey` of the row to highlight as selected (e.g. the one whose detail is open). */
+  selectedKey?: string | null;
   skeletonRows?: number;
   /** Cap the height and scroll inside the table, keeping the header visible. */
   maxHeight?: number | string;
@@ -41,6 +43,7 @@ export function DataTable<T>({
   empty,
   error,
   onRowClick,
+  selectedKey = null,
   skeletonRows = 5,
   maxHeight,
 }: DataTableProps<T>): JSX.Element {
@@ -90,7 +93,10 @@ export function DataTable<T>({
             : rows.map((row) => (
                 <tr
                   key={rowKey(row)}
-                  className={onRowClick ? "is-clickable" : undefined}
+                  className={[onRowClick ? "is-clickable" : "", selectedKey !== null && rowKey(row) === selectedKey ? "is-selected" : ""]
+                    .filter(Boolean)
+                    .join(" ") || undefined}
+                  aria-current={selectedKey !== null && rowKey(row) === selectedKey ? "true" : undefined}
                   tabIndex={onRowClick ? 0 : undefined}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                   onKeyDown={onRowClick ? (e) => handleKey(e, row) : undefined}

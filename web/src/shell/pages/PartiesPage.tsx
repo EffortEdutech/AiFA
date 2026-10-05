@@ -17,6 +17,10 @@
  * enforces. This page reflects that by showing the effective (override)
  * figure alongside the Party's own stored figure rather than only the
  * latter.
+ *
+ * UI polish Phase 3 (pilot page): presentation only — one table instead
+ * of a card per party, labelled form fields, shared status pills. The
+ * same reads and the same `createParty` call as before.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -26,6 +30,18 @@ import type { Party, PartyType } from "@aifa/core/sync/partyAndLedgerTransport";
 import { supabase } from "../../lib/supabaseClient";
 import { listParties } from "../../lib/partiesAndAccounts";
 import { listContracts, effectiveCreditLimitOverrideByParty } from "../../lib/legalCommercial";
+import {
+  Button,
+  Card,
+  DataTable,
+  EmptyState,
+  Field,
+  PageHeader,
+  StatusPill,
+  formatMoney,
+  humanizeStatus,
+  type Column,
+} from "../../ui";
 import { TabStrip } from "../TabStrip";
 
 const partyAndLedgerTransport = createSupabasePartyAndLedgerTransport(supabase);
@@ -50,6 +66,7 @@ export function PartiesPage({ businessId }: Props): JSX.Element {
   const [contactEmail, setContactEmail] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [creditLimit, setCreditLimit] = useState("");
+  const [creditLimitError, setCreditLimitError] = useState<string | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -70,6 +87,12 @@ export function PartiesPage({ businessId }: Props): JSX.Element {
 
   async function handleCreate(): Promise<void> {
     if (!displayName.trim() || partyTypes.length === 0) return;
+    const limit = creditLimit.trim() ? Number(creditLimit) : null;
+    if (limit !== null && Number.isNaN(limit)) {
+      setCreditLimitError("Enter the credit limit as a number, e.g. 5000.");
+      return;
+    }
+    setCreditLimitError(null);
     setCreateBusy(true);
     setCreateError(null);
     try {
@@ -79,7 +102,7 @@ export function PartiesPage({ businessId }: Props): JSX.Element {
         partyTypes,
         contactEmail: contactEmail.trim() || null,
         contactPhone: contactPhone.trim() || null,
-        creditLimit: creditLimit.trim() ? Number(creditLimit) : null,
+        creditLimit: limit,
       });
       setDisplayName("");
       setContactEmail("");
@@ -98,109 +121,168 @@ export function PartiesPage({ businessId }: Props): JSX.Element {
     setPartyTypes((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Parties</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
+  const filtered = parties === null ? null : parties.filter((p) => tab === "all" || p.partyTypes.includes(tab));
 
-  const filtered = (parties ?? []).filter((p) => tab === "all" || p.partyTypes.includes(tab));
+  const columns: Column<Party>[] = [
+    {
+      key: "name",
+      header: "Name",
+      render: (p) => (
+        <>
+          <strong>{p.displayName}</strong>
+          <span className="ui-cell-sub">{p.partyNo}</span>
+        </>
+      ),
+    },
+    { key: "types", header: "Type", render: (p) => p.partyTypes.map(humanizeStatus).join(", ") },
+    { key: "status", header: "Status", render: (p) => <StatusPill status={p.status} /> },
+    {
+      key: "credit",
+      header: "Credit limit",
+      numeric: true,
+      render: (p) => {
+        const override = creditLimitOverrideByParty[p.id];
+        return (
+          <>
+            {p.creditLimit != null ? formatMoney(p.creditLimit) : "—"}
+            {override != null && (
+              <span className="ui-cell-sub">
+                <strong>Effective {formatMoney(override)}</strong> — active Contract override takes precedence
+              </span>
+            )}
+          </>
+        );
+      },
+    },
+    {
+      key: "contact",
+      header: "Contact",
+      render: (p) => {
+        const parts = [p.contactEmail, p.contactPhone].filter(Boolean);
+        return parts.length > 0 ? parts.join(" · ") : "—";
+      },
+    },
+  ];
 
   return (
-    <div className="aifa-page">
-      <h1>Parties</h1>
-      <TabStrip
-        tabs={[
-          { id: "all", label: "All", count: parties?.length },
-          { id: "customer", label: "Customers" },
-          { id: "supplier", label: "Suppliers" },
-          { id: "employee", label: "Employees" },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
-
-      <div className="row" style={{ margin: "12px 0" }}>
-        <button onClick={() => setShowCreate((s) => !s)}>{showCreate ? "Cancel" : "New party"}</button>
-      </div>
+    <div className="ui-page">
+      <PageHeader
+        title="Parties"
+        description="Customers, suppliers, employees and agents you do business with."
+        actions={
+          <Button variant="primary" icon={showCreate ? "x" : "plus"} onClick={() => setShowCreate((s) => !s)}>
+            {showCreate ? "Cancel" : "New party"}
+          </Button>
+        }
+      >
+        <TabStrip
+          tabs={[
+            { id: "all", label: "All", count: parties?.length },
+            { id: "customer", label: "Customers" },
+            { id: "supplier", label: "Suppliers" },
+            { id: "employee", label: "Employees" },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
 
       {showCreate && (
-        <div className="card">
-          <h2 style={{ fontSize: 16, marginTop: 0 }}>New party</h2>
-          <div className="row">
-            <input
-              placeholder="Display name"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              style={{ padding: 6, flex: 1, minWidth: 200 }}
-            />
-          </div>
-          <div className="row" style={{ marginTop: 8 }}>
-            {PARTY_TYPE_OPTIONS.map((t) => (
-              <label key={t} className="muted" style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <input type="checkbox" checked={partyTypes.includes(t)} onChange={() => toggleType(t)} />
-                {t}
-              </label>
-            ))}
-          </div>
-          <div className="row" style={{ marginTop: 8 }}>
-            <input
-              placeholder="Contact email"
-              value={contactEmail}
-              onChange={(e) => setContactEmail(e.target.value)}
-              style={{ padding: 6 }}
-            />
-            <input
-              placeholder="Contact phone"
-              value={contactPhone}
-              onChange={(e) => setContactPhone(e.target.value)}
-              style={{ padding: 6 }}
-            />
-            <input
-              placeholder="Credit limit (RM)"
-              value={creditLimit}
-              onChange={(e) => setCreditLimit(e.target.value)}
-              style={{ padding: 6, width: 140 }}
-            />
-          </div>
-          <div className="row" style={{ marginTop: 8 }}>
-            <button onClick={() => void handleCreate()} disabled={createBusy || !displayName.trim()}>
-              {createBusy ? "Creating…" : "Create party"}
-            </button>
-          </div>
-          {createError && <p className="error">{createError}</p>}
-        </div>
-      )}
-
-      {parties === null ? (
-        <p className="muted">Loading…</p>
-      ) : filtered.length === 0 ? (
-        <p className="muted">No parties yet.</p>
-      ) : (
-        filtered.map((p) => (
-          <div key={p.id} className="card">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <strong>{p.displayName}</strong>
-              <span className="muted">{p.partyNo}</span>
+        <Card title="New party">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!createBusy) void handleCreate();
+            }}
+            noValidate
+          >
+            <div className="ui-form-grid">
+              <Field label="Display name" required>
+                {(p) => (
+                  <input {...p} className="ui-input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+                )}
+              </Field>
+              <Field label="Contact email">
+                {(p) => (
+                  <input
+                    {...p}
+                    className="ui-input"
+                    type="email"
+                    value={contactEmail}
+                    onChange={(e) => setContactEmail(e.target.value)}
+                  />
+                )}
+              </Field>
+              <Field label="Contact phone">
+                {(p) => (
+                  <input {...p} className="ui-input" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} />
+                )}
+              </Field>
+              <Field label="Credit limit (RM)" hint="Optional" error={creditLimitError}>
+                {(p) => (
+                  <input
+                    {...p}
+                    className="ui-input"
+                    inputMode="decimal"
+                    value={creditLimit}
+                    onChange={(e) => setCreditLimit(e.target.value)}
+                  />
+                )}
+              </Field>
             </div>
-            <p className="muted" style={{ margin: "4px 0" }}>
-              {p.partyTypes.join(", ")} · {p.status}
-              {p.creditLimit != null && ` · Credit limit RM${p.creditLimit.toFixed(2)}`}
-              {creditLimitOverrideByParty[p.id] != null && (
-                <> · <strong>Effective credit limit RM{creditLimitOverrideByParty[p.id].toFixed(2)} (active Contract override takes precedence)</strong></>
-              )}
-            </p>
-            {(p.contactEmail || p.contactPhone) && (
-              <p className="muted" style={{ margin: "4px 0" }}>
-                {[p.contactEmail, p.contactPhone].filter(Boolean).join(" · ")}
+            <fieldset className="ui-check-group" style={{ marginTop: "var(--aifa-space-4)" }}>
+              <legend>Party type</legend>
+              <div className="ui-check-row">
+                {PARTY_TYPE_OPTIONS.map((t) => (
+                  <label key={t} className="ui-check">
+                    <input type="checkbox" checked={partyTypes.includes(t)} onChange={() => toggleType(t)} />
+                    {humanizeStatus(t)}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            {createError && (
+              <p className="aifa-alert aifa-alert--danger" role="alert" style={{ marginTop: "var(--aifa-space-3)" }}>
+                {createError}
               </p>
             )}
-          </div>
-        ))
+            <div className="ui-form-actions">
+              <Button type="submit" variant="primary" loading={createBusy} disabled={!displayName.trim() || partyTypes.length === 0}>
+                {createBusy ? "Creating…" : "Create party"}
+              </Button>
+              {partyTypes.length === 0 && <span className="ui-muted">Choose at least one party type.</span>}
+            </div>
+          </form>
+        </Card>
       )}
+
+      <Card flush>
+        <DataTable
+          caption="Parties"
+          columns={columns}
+          rows={filtered}
+          rowKey={(p) => p.id}
+          error={loadError}
+          empty={
+            <EmptyState
+              icon="users"
+              title={tab === "all" ? "No parties yet" : "No parties in this view"}
+              description={
+                tab === "all"
+                  ? "Add your first customer or supplier to start quoting and invoicing."
+                  : "Parties of this type will appear here."
+              }
+              action={
+                tab === "all" && !showCreate ? (
+                  <Button variant="primary" icon="plus" onClick={() => setShowCreate(true)}>
+                    New party
+                  </Button>
+                ) : undefined
+              }
+            />
+          }
+        />
+      </Card>
     </div>
   );
 }

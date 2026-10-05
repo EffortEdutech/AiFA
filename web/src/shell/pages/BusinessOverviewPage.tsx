@@ -42,6 +42,10 @@
  * The Snapshot tab's AP figure is therefore always RM0.00, genuinely,
  * not a missing-data placeholder — labelled as such rather than shown
  * as a bare, unexplained zero.
+ *
+ * UI polish Phase 3 (pilot page): presentation only — headline figures
+ * are stat tiles, lists are tables, and the tab set, reads and disclosure
+ * labels (AP RM0.00, simulated e-Invoice provider) are unchanged.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -61,6 +65,22 @@ import { listQuotations } from "../../lib/salesCycle";
 import { listApprovalTasks } from "../../lib/approvals";
 import { listEInvoiceSubmissions } from "../../lib/einvoiceSst";
 import { listMemberships, listRoles, type RoleSummary } from "../../lib/membership";
+import {
+  Button,
+  Card,
+  DataTable,
+  Icon,
+  PageHeader,
+  SkeletonLines,
+  StatGrid,
+  StatTile,
+  StatusPill,
+  formatDate,
+  formatMoney,
+  humanizeStatus,
+  statusTone,
+  type Column,
+} from "../../ui";
 import { TabStrip } from "../TabStrip";
 import { TodayMoneyMovesTab } from "./TodayMoneyMovesTab";
 
@@ -79,10 +99,6 @@ interface Props {
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-function fmt(n: number): string {
-  return `RM${n.toFixed(2)}`;
 }
 
 const QUOTATION_STATUSES: QuotationStatus[] = ["draft", "sent", "accepted", "rejected", "expired", "converted_to_invoice"];
@@ -167,165 +183,188 @@ export function BusinessOverviewPage({ businessId, onGoToApprovals, onNavigate }
     return roles.find((r) => r.id === roleId)?.name ?? roleId.slice(0, 8);
   }
 
-  const cashBalance = trialBalance?.find((e) => e.accountCode === "1000")?.balance ?? null;
-  const arBalance = trialBalance?.find((e) => e.accountCode === "1100")?.balance ?? null;
+  // Once the trial balance has loaded, an account with no row has no postings yet: RM0.00.
+  const cashBalance = trialBalance === null ? null : (trialBalance.find((e) => e.accountCode === "1000")?.balance ?? 0);
+  const arBalance = trialBalance === null ? null : (trialBalance.find((e) => e.accountCode === "1100")?.balance ?? 0);
   const apBalance = trialBalance?.find((e) => e.accountCode === "2000")?.balance ?? 0;
 
-  return (
-    <div className="aifa-page">
-      <h1>Business Overview</h1>
-      <TabStrip
-        tabs={[
-          { id: "today", label: "Today" },
-          { id: "snapshot", label: "Snapshot" },
-          { id: "sales-pipeline", label: "Sales Pipeline" },
-          { id: "compliance-status", label: "Compliance Status" },
-          { id: "team-activity", label: "Team Activity" },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
+  const overdueEntries = arEntries === null ? null : arEntries.filter((e) => e.ageingBucket !== "current");
 
-      {loadError && <p className="error">{loadError}</p>}
+  const membershipColumns: Column<BusinessMembership>[] = [
+    { key: "role", header: "Role", render: (m) => roleName(m.roleId) },
+    { key: "status", header: "Status", render: (m) => <StatusPill status={m.status} /> },
+  ];
+
+  const decisionColumns: Column<ApprovalTask>[] = [
+    { key: "area", header: "Area", render: (t) => humanizeStatus(t.domain) },
+    {
+      key: "subject",
+      header: "Subject",
+      render: (t) => `${humanizeStatus(t.subjectType)} #${t.subjectId.slice(0, 8)}`,
+    },
+    { key: "status", header: "Decision", render: (t) => <StatusPill status={t.status} /> },
+    { key: "via", header: "Resolved via", render: (t) => humanizeStatus(String(t.resolvedVia ?? "")) || "—" },
+    { key: "date", header: "Decided", render: (t) => formatDate(t.decidedAt) },
+  ];
+
+  return (
+    <div className="ui-page">
+      <PageHeader title="Business Overview" description="What needs attention today, and where the business stands.">
+        <TabStrip
+          tabs={[
+            { id: "today", label: "Today" },
+            { id: "snapshot", label: "Snapshot" },
+            { id: "sales-pipeline", label: "Sales Pipeline" },
+            { id: "compliance-status", label: "Compliance Status" },
+            { id: "team-activity", label: "Team Activity" },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
+
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert" style={{ marginBottom: "var(--aifa-space-4)" }}>
+          {loadError}
+        </p>
+      )}
 
       {tab === "today" && <TodayMoneyMovesTab businessId={businessId} onNavigate={onNavigate} />}
 
       {tab === "snapshot" && (
-        <div className="card">
-          <div className="row" style={{ gap: 32, flexWrap: "wrap" }}>
-            <div>
-              <div className="muted" style={{ fontSize: 12 }}>Cash position</div>
-              <div style={{ fontSize: 24, fontWeight: 700 }}>{cashBalance == null ? "…" : fmt(cashBalance)}</div>
-            </div>
-            <div>
-              <div className="muted" style={{ fontSize: 12 }}>Accounts Receivable</div>
-              <div style={{ fontSize: 24, fontWeight: 700 }}>{arBalance == null ? "…" : fmt(arBalance)}</div>
-            </div>
-            <div>
-              <div className="muted" style={{ fontSize: 12 }}>Accounts Payable</div>
-              <div style={{ fontSize: 24, fontWeight: 700 }}>{fmt(apBalance)}</div>
-              {apBalance === 0 && (
-                <div className="muted" style={{ fontSize: 11 }}>
-                  Always RM0.00 — Payment Vouchers post cash-basis, nothing accrues to this account yet.
-                </div>
-              )}
-            </div>
-            <div>
-              <div className="muted" style={{ fontSize: 12 }}>Pending Approvals</div>
-              <div style={{ fontSize: 24, fontWeight: 700 }}>{pendingApprovalsCount ?? "…"}</div>
-              {onGoToApprovals && pendingApprovalsCount !== null && pendingApprovalsCount > 0 && (
-                <button onClick={onGoToApprovals} style={{ padding: "0 4px", marginTop: 4 }}>
+        <StatGrid>
+          <StatTile label="Cash position" value={cashBalance === null ? null : formatMoney(cashBalance)} />
+          <StatTile label="Accounts Receivable" value={arBalance === null ? null : formatMoney(arBalance)} />
+          <StatTile
+            label="Accounts Payable"
+            value={formatMoney(apBalance)}
+            hint={
+              apBalance === 0
+                ? "Always RM0.00 — Payment Vouchers post cash-basis, nothing accrues to this account yet."
+                : undefined
+            }
+          />
+          <StatTile
+            label="Pending Approvals"
+            value={pendingApprovalsCount}
+            tone={pendingApprovalsCount !== null && pendingApprovalsCount > 0 ? "warning" : "neutral"}
+            hint={
+              onGoToApprovals && pendingApprovalsCount !== null && pendingApprovalsCount > 0 ? (
+                <Button size="sm" variant="secondary" onClick={onGoToApprovals}>
                   Go to Approvals
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
+                </Button>
+              ) : undefined
+            }
+          />
+        </StatGrid>
       )}
 
       {tab === "sales-pipeline" && (
         <>
-          <div className="card" style={{ marginBottom: 12 }}>
-            <strong>Quotations by status</strong>
-            <div className="row" style={{ gap: 24, marginTop: 8, flexWrap: "wrap" }}>
+          <Card title="Quotations by status">
+            <StatGrid>
               {QUOTATION_STATUSES.map((s) => (
-                <div key={s}>
-                  <div className="muted" style={{ fontSize: 12 }}>{s}</div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>
-                    {quotations === null ? "…" : quotations.filter((q) => q.status === s).length}
-                  </div>
-                </div>
+                <StatTile
+                  key={s}
+                  label={humanizeStatus(s)}
+                  value={quotations === null ? null : quotations.filter((q) => q.status === s).length}
+                  tone={statusTone(s)}
+                />
               ))}
-            </div>
-          </div>
-          <div className="card">
-            <strong>Overdue Invoices (AR Ageing)</strong>
-            <p className="muted" style={{ margin: "4px 0" }}>
-              Any ageing bucket other than "current" — same `arAgeingDetail` source AR Ageing's own page uses.
-            </p>
-            {arEntries === null ? (
-              <p className="muted">Loading…</p>
-            ) : (
-              <div className="row" style={{ gap: 24, flexWrap: "wrap" }}>
-                <div>
-                  <div className="muted" style={{ fontSize: 12 }}>Overdue invoices</div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>
-                    {arEntries.filter((e) => e.ageingBucket !== "current").length}
-                  </div>
-                </div>
-                <div>
-                  <div className="muted" style={{ fontSize: 12 }}>Overdue amount</div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>
-                    {fmt(arEntries.filter((e) => e.ageingBucket !== "current").reduce((sum, e) => sum + e.outstandingBalance, 0))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+            </StatGrid>
+          </Card>
+          <Card
+            title="Overdue invoices (AR ageing)"
+            description="Invoices in any ageing bucket other than current — the same source as the AR Ageing page."
+            actions={
+              onNavigate ? (
+                <Button size="sm" variant="secondary" onClick={() => onNavigate("ar-ageing")}>
+                  View AR Ageing
+                </Button>
+              ) : undefined
+            }
+          >
+            <StatGrid>
+              <StatTile
+                label="Overdue invoices"
+                value={overdueEntries === null ? null : overdueEntries.length}
+                tone={overdueEntries !== null && overdueEntries.length > 0 ? "danger" : "neutral"}
+              />
+              <StatTile
+                label="Overdue amount"
+                value={
+                  overdueEntries === null
+                    ? null
+                    : formatMoney(overdueEntries.reduce((sum, e) => sum + e.outstandingBalance, 0))
+                }
+                tone={overdueEntries !== null && overdueEntries.length > 0 ? "danger" : "neutral"}
+              />
+            </StatGrid>
+          </Card>
         </>
       )}
 
       {tab === "compliance-status" && (
         <>
-          <div className="card" style={{ marginBottom: 12 }}>
-            <strong>e-Invoice submissions by status</strong>
-            <p className="muted" style={{ margin: "4px 0" }}>
-              ⚠ Simulated provider (see e-Invoice &amp; SST's own page) — these figures reflect the stub, not real
-              LHDN MyInvois submissions.
+          <Card title="e-Invoice submissions by status">
+            <p className="aifa-alert aifa-alert--warning" style={{ marginBottom: "var(--aifa-space-4)" }}>
+              <Icon name="alert" size={16} /> Simulated provider (see e-Invoice &amp; SST's own page) — these figures
+              reflect the stub, not real LHDN MyInvois submissions.
             </p>
-            <div className="row" style={{ gap: 24, flexWrap: "wrap" }}>
+            <StatGrid>
               {EINVOICE_STATUSES.map((s) => (
-                <div key={s}>
-                  <div className="muted" style={{ fontSize: 12 }}>{s}</div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>
-                    {eInvoiceSubmissions === null ? "…" : eInvoiceSubmissions.filter((e) => e.status === s).length}
-                  </div>
-                </div>
+                <StatTile
+                  key={s}
+                  label={humanizeStatus(s)}
+                  value={eInvoiceSubmissions === null ? null : eInvoiceSubmissions.filter((e) => e.status === s).length}
+                  tone={statusTone(s)}
+                />
               ))}
-            </div>
-          </div>
-          <div className="card">
-            <strong>Contract alerts due</strong>
+            </StatGrid>
+          </Card>
+          <Card
+            title="Contract alerts due"
+            actions={
+              onNavigate && dueContractAlerts !== null && dueContractAlerts.length > 0 ? (
+                <Button size="sm" variant="secondary" onClick={() => onNavigate("contracts-alerts")}>
+                  View Contracts &amp; Alerts
+                </Button>
+              ) : undefined
+            }
+          >
             {dueContractAlerts === null ? (
-              <p className="muted">Loading…</p>
+              <SkeletonLines lines={1} />
             ) : dueContractAlerts.length === 0 ? (
-              <p className="muted">No alerts due today.</p>
+              <p className="ui-muted" style={{ margin: 0 }}>
+                No alerts due today.
+              </p>
             ) : (
-              <p style={{ margin: "4px 0" }}>{dueContractAlerts.length} alert(s) due — see Contracts &amp; Alerts.</p>
+              <p style={{ margin: 0 }}>{dueContractAlerts.length} alert(s) due — see Contracts &amp; Alerts.</p>
             )}
-          </div>
+          </Card>
         </>
       )}
 
       {tab === "team-activity" && (
         <>
-          <div className="card" style={{ marginBottom: 12 }}>
-            <strong>Membership roster</strong>
-            {memberships === null ? (
-              <p className="muted">Loading…</p>
-            ) : (
-              memberships.map((m) => (
-                <p key={m.id} className="muted" style={{ margin: "4px 0" }}>
-                  {roleName(m.roleId)} · {m.status}
-                </p>
-              ))
-            )}
-          </div>
-          <div className="card">
-            <strong>Recent approval decisions</strong>
-            {recentDecisions === null ? (
-              <p className="muted">Loading…</p>
-            ) : recentDecisions.length === 0 ? (
-              <p className="muted">No decisions recorded yet.</p>
-            ) : (
-              recentDecisions.map((t) => (
-                <p key={t.id} className="muted" style={{ margin: "4px 0" }}>
-                  {t.domain} / {t.subjectType} #{t.subjectId.slice(0, 8)} — {t.status} ({t.resolvedVia})
-                  {t.decidedAt && ` · ${t.decidedAt.slice(0, 10)}`}
-                </p>
-              ))
-            )}
-          </div>
+          <Card title="Membership roster" flush>
+            <DataTable
+              caption="Membership roster"
+              columns={membershipColumns}
+              rows={memberships}
+              rowKey={(m) => m.id}
+              empty={<div className="ui-table-state">No members yet.</div>}
+            />
+          </Card>
+          <Card title="Recent approval decisions" flush>
+            <DataTable
+              caption="Recent approval decisions"
+              columns={decisionColumns}
+              rows={recentDecisions}
+              rowKey={(t) => t.id}
+              empty={<div className="ui-table-state">No decisions recorded yet.</div>}
+            />
+          </Card>
         </>
       )}
     </div>
