@@ -27,9 +27,11 @@
  * unbuilt and disclosed here and in this sprint's Outcomes, rather
  * than shipping a dead button — Invoice-side SST computation (the
  * primary flow) is fully built below.
+ *
+ * UI polish Phase 4: presentation only. Both SIMULATED banners, the tax-advice
+ * boundary statement and every disclosure below are kept, as alerts.
  */
 import { useCallback, useEffect, useState } from "react";
-import type { CSSProperties } from "react";
 
 import {
   createSupabaseEInvoiceSstTransport,
@@ -48,6 +50,7 @@ import {
   listSstReturns,
   listEInvoiceSubmissionLines,
 } from "../../lib/einvoiceSst";
+import { Button, Card, DataTable, Field, PageHeader, StatusPill, formatMoney, type Column } from "../../ui";
 import { TabStrip } from "../TabStrip";
 
 const eInvoiceSstTransport = createSupabaseEInvoiceSstTransport(supabase);
@@ -59,33 +62,10 @@ interface Props {
   businessId: string;
 }
 
-const STUB_BANNER_STYLE: CSSProperties = {
-  padding: "8px 12px",
-  marginBottom: 12,
-  borderRadius: 6,
-  background: "#7a1f1f",
-  color: "#fff",
-  fontWeight: 700,
-  textAlign: "center",
-};
-
 function invoiceLabel(invoices: Invoice[], id: string | null): string {
   if (!id) return "(consolidated batch)";
   const inv = invoices.find((i) => i.id === id);
   return inv ? inv.invoiceNo : `Invoice #${id.slice(0, 8)}`;
-}
-
-function statusColor(status: EInvoiceSubmission["status"]): string {
-  switch (status) {
-    case "validated":
-      return "#1b7a3d";
-    case "rejected":
-      return "#c0392b";
-    case "cancelled":
-      return "#8a6d00";
-    default:
-      return "inherit";
-  }
 }
 
 function parseIrbResponse(ref: string | null): { code?: string; message?: string; simulated?: boolean } | null {
@@ -270,266 +250,337 @@ export function EInvoiceSstPage({ businessId }: Props): JSX.Element {
     }
   }
 
+  const submissionColumns: Column<EInvoiceSubmission>[] = [
+    {
+      key: "sub",
+      header: "Submission",
+      render: (s) => (
+        <>
+          <strong>
+            {s.submissionType === "consolidated" ? `Consolidated — ${s.consolidatedPeriod}` : invoiceLabel(invoices, s.invoiceId)}
+          </strong>
+          {s.submissionType === "consolidated" && (
+            <div>
+              <button type="button" className="aifa-link-btn" onClick={() => void loadSubmissionLines(s.id)}>
+                {submissionLinesById[s.id] ? `${submissionLinesById[s.id].length} invoice(s) in this batch` : "Show invoices in batch"}
+              </button>
+            </div>
+          )}
+        </>
+      ),
+    },
+    { key: "status", header: "Status", render: (s) => <StatusPill status={s.status} /> },
+    {
+      key: "detail",
+      header: "Simulated result",
+      render: (s) => {
+        const rejection = s.status === "rejected" ? parseIrbResponse(s.irbResponseRef) : null;
+        const success = s.status === "validated" ? parseIrbResponse(s.irbResponseRef) : null;
+        return (
+          <>
+            {s.lhdnUuid && (
+              <div className="ui-cell-sub">
+                Simulated LHDN UUID: <code>{s.lhdnUuid}</code> · Simulated QR ref: <code>{s.qrCodeRef}</code>
+              </div>
+            )}
+            {success && <div className="ui-cell-sub">Simulated IRB response: {success.code ?? "OK"}</div>}
+            {rejection && (
+              <div className="ui-cell-sub" style={{ color: "var(--aifa-danger)" }}>
+                Simulated rejection — {rejection.code ?? "no code"}: {rejection.message ?? "no message"}
+              </div>
+            )}
+          </>
+        );
+      },
+    },
+    {
+      key: "actions",
+      header: "",
+      render: (s) =>
+        s.status === "draft" ? (
+          <div className="ui-inline-actions">
+            <Button size="sm" variant="primary" loading={busyId === s.id} onClick={() => void handleSubmitToStub(s)}>
+              {busyId === s.id ? "Submitting (simulated)…" : "Submit (simulated — succeed)"}
+            </Button>
+            <Button size="sm" variant="secondary" disabled={busyId === s.id} onClick={() => setSimulateRejectFor(simulateRejectFor === s.id ? null : s.id)}>
+              {simulateRejectFor === s.id ? "Cancel" : "Submit (simulated — test rejection)"}
+            </Button>
+          </div>
+        ) : null,
+    },
+  ];
+
+  const sstTxColumns: Column<SstTransaction>[] = [
+    {
+      key: "src",
+      header: "Source",
+      render: (t) => (t.invoiceId ? invoiceLabel(invoices, t.invoiceId) : `PV #${(t.paymentVoucherId ?? "").slice(0, 8)}`),
+    },
+    { key: "code", header: "SST code", render: (t) => t.sstCode },
+    { key: "rate", header: "Rate", numeric: true, render: (t) => `${(t.rate * 100).toFixed(0)}%` },
+    { key: "taxable", header: "Taxable amount", numeric: true, render: (t) => formatMoney(t.taxableAmount) },
+    { key: "sst", header: "SST amount", numeric: true, render: (t) => formatMoney(t.sstAmount) },
+  ];
+
+  const returnColumns: Column<SstReturn>[] = [
+    { key: "period", header: "Period", render: (r) => <strong>{r.period}</strong> },
+    { key: "status", header: "Status", render: (r) => <StatusPill status={r.status} /> },
+    { key: "tax", header: "Total output tax", numeric: true, render: (r) => formatMoney(r.totalOutputTax) },
+    {
+      key: "actions",
+      header: "",
+      render: (r) =>
+        r.status === "draft" ? (
+          <Button size="sm" variant="secondary" loading={busyId === r.id} onClick={() => void handleSubmitReturn(r)}>
+            {busyId === r.id ? "Submitting…" : "Submit (status only — not a real Kastam filing)"}
+          </Button>
+        ) : null,
+    },
+  ];
+
+  const rejectTarget = submissions?.find((x) => x.id === simulateRejectFor) ?? null;
+
   return (
     <div className="aifa-page">
-      <h1>e-Invoice &amp; SST Compliance</h1>
+      <PageHeader
+        title="e-Invoice & SST Compliance"
+        description={TAX_ADVICE_BOUNDARY_STATEMENT}
+      >
+        <TabStrip
+          tabs={[
+            { id: "e-invoice", label: "e-Invoice" },
+            { id: "sst", label: "SST" },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      </PageHeader>
 
-      <div style={STUB_BANNER_STYLE}>
+      <div className="aifa-alert aifa-alert--danger" role="alert" style={{ textAlign: "center", fontWeight: 700 }}>
         ⚠ SIMULATED — NOT CONNECTED TO LHDN MyInvois. Every result on this page (uuid, QR code, IRB response) is
         fabricated by a local stub, not a real government submission.
       </div>
-      <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>{TAX_ADVICE_BOUNDARY_STATEMENT}</p>
 
-      <TabStrip
-        tabs={[
-          { id: "e-invoice", label: "e-Invoice" },
-          { id: "sst", label: "SST" },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
-
-      <div style={STUB_BANNER_STYLE}>
-        ⚠ SIMULATED — NOT CONNECTED TO LHDN MyInvois.
-      </div>
-
-      {loadError && <p className="error">{loadError}</p>}
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
 
       {tab === "e-invoice" && (
         <>
-          <div className="card" style={{ marginBottom: 12 }}>
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>New submission (single invoice)</h2>
-            <div className="row">
-              <select value={createInvoiceId} onChange={(e) => setCreateInvoiceId(e.target.value)} style={{ padding: 6, minWidth: 220 }}>
-                <option value="">Select invoice…</option>
-                {eligibleInvoices.map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {i.invoiceNo}
-                  </option>
-                ))}
-              </select>
-              <button onClick={() => void handleCreateSubmission()} disabled={createBusy || !createInvoiceId}>
-                {createBusy ? "Creating…" : "Create draft submission"}
-              </button>
-            </div>
-            {eligibleInvoices.length === 0 && <p className="muted" style={{ marginTop: 4 }}>Every invoice already has an active submission.</p>}
-            {createError && <p className="error">{createError}</p>}
-          </div>
+          <Card title="New submission (single invoice)">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!createBusy && createInvoiceId) void handleCreateSubmission();
+              }}
+            >
+              <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+                <Field label="Invoice">
+                  {(p) => (
+                    <select {...p} className="ui-select" value={createInvoiceId} onChange={(e) => setCreateInvoiceId(e.target.value)}>
+                      <option value="">Select invoice…</option>
+                      {eligibleInvoices.map((i) => (
+                        <option key={i.id} value={i.id}>
+                          {i.invoiceNo}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </Field>
+                <Button type="submit" variant="primary" loading={createBusy} disabled={!createInvoiceId}>
+                  {createBusy ? "Creating…" : "Create draft submission"}
+                </Button>
+              </div>
+              {eligibleInvoices.length === 0 && <p className="ui-muted">Every invoice already has an active submission.</p>}
+              {createError && (
+                <p className="aifa-alert aifa-alert--danger" role="alert">
+                  {createError}
+                </p>
+              )}
+            </form>
+          </Card>
 
-          <div className="card" style={{ marginBottom: 12 }}>
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>New consolidated batch</h2>
-            <div className="row">
-              <input
-                placeholder="Period (e.g. 2026-08)"
-                value={consolidatedPeriod}
-                onChange={(e) => setConsolidatedPeriod(e.target.value)}
-                style={{ padding: 6, width: 160 }}
-              />
-              <button onClick={() => void handleGenerateConsolidated()} disabled={consolidatedBusy || !consolidatedPeriod.trim()}>
-                {consolidatedBusy ? "Generating…" : "Generate batch"}
-              </button>
-            </div>
-            <p className="muted" style={{ marginTop: 4 }}>
-              Bundles all eligible (non-B2B) invoices in this period into one draft submission. Throws if a batch
-              already exists for the period, or no eligible invoices are found.
+          <Card
+            title="New consolidated batch"
+            description="Bundles all eligible (non-B2B) invoices in this period into one draft submission. Throws if a batch already exists for the period, or no eligible invoices are found."
+          >
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!consolidatedBusy && consolidatedPeriod.trim()) void handleGenerateConsolidated();
+              }}
+            >
+              <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+                <Field label="Period" hint="e.g. 2026-08">
+                  {(p) => <input {...p} className="ui-input" value={consolidatedPeriod} onChange={(e) => setConsolidatedPeriod(e.target.value)} />}
+                </Field>
+                <Button type="submit" variant="primary" loading={consolidatedBusy} disabled={!consolidatedPeriod.trim()}>
+                  {consolidatedBusy ? "Generating…" : "Generate batch"}
+                </Button>
+              </div>
+              {consolidatedError && (
+                <p className="aifa-alert aifa-alert--danger" role="alert">
+                  {consolidatedError}
+                </p>
+              )}
+            </form>
+          </Card>
+
+          {actionError && (
+            <p className="aifa-alert aifa-alert--danger" role="alert">
+              {actionError}
             </p>
-            {consolidatedError && <p className="error">{consolidatedError}</p>}
-          </div>
-
-          {actionError && <p className="error">{actionError}</p>}
-
-          {submissions === null ? (
-            <p className="muted">Loading…</p>
-          ) : submissions.length === 0 ? (
-            <p className="muted">No e-Invoice submissions yet.</p>
-          ) : (
-            submissions.map((s) => {
-              const busy = busyId === s.id;
-              const rejection = s.status === "rejected" ? parseIrbResponse(s.irbResponseRef) : null;
-              const success = s.status === "validated" ? parseIrbResponse(s.irbResponseRef) : null;
-              return (
-                <div key={s.id} className="card">
-                  <div className="row" style={{ justifyContent: "space-between" }}>
-                    <strong>
-                      {s.submissionType === "consolidated"
-                        ? `Consolidated — ${s.consolidatedPeriod}`
-                        : invoiceLabel(invoices, s.invoiceId)}
-                    </strong>
-                    <span style={{ color: statusColor(s.status), fontWeight: 600 }}>{s.status}</span>
-                  </div>
-                  {s.submissionType === "consolidated" && (
-                    <div style={{ marginTop: 4 }}>
-                      <button onClick={() => void loadSubmissionLines(s.id)} style={{ padding: "0 4px" }}>
-                        {submissionLinesById[s.id] ? `${submissionLinesById[s.id].length} invoice(s) in this batch` : "Show invoices in batch"}
-                      </button>
-                    </div>
-                  )}
-                  {s.lhdnUuid && (
-                    <p className="muted" style={{ margin: "4px 0" }}>
-                      Simulated LHDN UUID: <code>{s.lhdnUuid}</code> · Simulated QR ref: <code>{s.qrCodeRef}</code>
-                    </p>
-                  )}
-                  {success && (
-                    <p className="muted" style={{ margin: "4px 0" }}>
-                      Simulated IRB response: {success.code ?? "OK"}
-                    </p>
-                  )}
-                  {rejection && (
-                    <p className="error" style={{ margin: "4px 0" }}>
-                      Simulated rejection — {rejection.code ?? "no code"}: {rejection.message ?? "no message"}
-                    </p>
-                  )}
-
-                  {s.status === "draft" && (
-                    <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
-                      <button onClick={() => void handleSubmitToStub(s)} disabled={busy}>
-                        {busy ? "Submitting (simulated)…" : "Submit (simulated — succeed)"}
-                      </button>
-                      <button onClick={() => setSimulateRejectFor(simulateRejectFor === s.id ? null : s.id)} disabled={busy}>
-                        {simulateRejectFor === s.id ? "Cancel" : "Submit (simulated — test rejection)"}
-                      </button>
-                    </div>
-                  )}
-                  {simulateRejectFor === s.id && (
-                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--aifa-border, #e2e2e2)" }}>
-                      <div className="row">
-                        <input placeholder="IRB response code" value={rejectCode} onChange={(e) => setRejectCode(e.target.value)} style={{ padding: 6, width: 220 }} />
-                      </div>
-                      <div className="row" style={{ marginTop: 6 }}>
-                        <input placeholder="IRB response message" value={rejectMessage} onChange={(e) => setRejectMessage(e.target.value)} style={{ padding: 6, flex: 1 }} />
-                      </div>
-                      <div className="row" style={{ marginTop: 6 }}>
-                        <button
-                          onClick={() => void handleSubmitToStub(s, { irbResponseCode: rejectCode, irbResponseMessage: rejectMessage })}
-                          disabled={busy || !rejectCode.trim() || !rejectMessage.trim()}
-                        >
-                          {busy ? "Submitting (simulated)…" : "Confirm simulated rejection"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })
           )}
+
+          {rejectTarget && (
+            <Card
+              title="Simulated rejection"
+              description={`For ${rejectTarget.submissionType === "consolidated" ? `consolidated ${rejectTarget.consolidatedPeriod}` : invoiceLabel(invoices, rejectTarget.invoiceId)}`}
+            >
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (rejectCode.trim() && rejectMessage.trim())
+                    void handleSubmitToStub(rejectTarget, { irbResponseCode: rejectCode, irbResponseMessage: rejectMessage });
+                }}
+              >
+                <div className="ui-form-grid">
+                  <Field label="IRB response code">
+                    {(p) => <input {...p} className="ui-input" value={rejectCode} onChange={(e) => setRejectCode(e.target.value)} />}
+                  </Field>
+                  <Field label="IRB response message">
+                    {(p) => <input {...p} className="ui-input" value={rejectMessage} onChange={(e) => setRejectMessage(e.target.value)} />}
+                  </Field>
+                </div>
+                <div className="ui-form-actions">
+                  <Button
+                    type="submit"
+                    variant="danger"
+                    loading={busyId === rejectTarget.id}
+                    disabled={!rejectCode.trim() || !rejectMessage.trim()}
+                  >
+                    {busyId === rejectTarget.id ? "Submitting (simulated)…" : "Confirm simulated rejection"}
+                  </Button>
+                </div>
+              </form>
+            </Card>
+          )}
+
+          <Card title="Submissions" flush>
+            <DataTable
+              caption="e-Invoice submissions"
+              columns={submissionColumns}
+              rows={loadError ? [] : submissions}
+              rowKey={(s) => s.id}
+              empty={<div className="ui-table-state">No e-Invoice submissions yet.</div>}
+            />
+          </Card>
         </>
       )}
 
       {tab === "sst" && (
         <>
-          <div className="card" style={{ marginBottom: 12 }}>
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>SST rate catalog</h2>
-            {sstRates.map((r) => (
-              <div key={r.sstCode} className="row" style={{ justifyContent: "space-between", marginTop: 4 }}>
-                <span>
-                  <strong>{r.sstCode}</strong> <span className="muted">({r.taxType})</span>
-                </span>
-                <span className="muted">
-                  {(r.rate * 100).toFixed(0)}% — {r.description}
-                </span>
-              </div>
-            ))}
-          </div>
+          <Card title="SST rate catalog">
+            <ul className="ui-move-list">
+              {sstRates.map((r) => (
+                <li key={r.sstCode} className="ui-move">
+                  <span>
+                    <strong>{r.sstCode}</strong> <span className="ui-muted">({r.taxType})</span>
+                  </span>
+                  <span className="ui-muted">
+                    {(r.rate * 100).toFixed(0)}% — {r.description}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Card>
 
-          <div className="card" style={{ marginBottom: 12 }}>
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>Compute SST for an invoice</h2>
-            <div className="row">
-              <select value={computeInvoiceId} onChange={(e) => setComputeInvoiceId(e.target.value)} style={{ padding: 6, minWidth: 220 }}>
-                <option value="">Select invoice…</option>
-                {invoices.map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {i.invoiceNo}
-                  </option>
-                ))}
-              </select>
-              <button onClick={() => void handleComputeSst()} disabled={computeBusy || !computeInvoiceId}>
-                {computeBusy ? "Computing…" : "Compute SST"}
-              </button>
-            </div>
-            <p className="muted" style={{ marginTop: 4 }}>
-              Only lines carrying a recognised tax code (set at quotation/invoice line entry) are taxed; lines with
-              no tax code are silently skipped — not an error. Throws if SST was already computed for this invoice.
-            </p>
-            <p className="muted" style={{ marginTop: 4 }}>
-              Payment Voucher SST computation isn't reachable from this page — see this page's own header comment
-              for the disclosed reason (no way to set a Payment Voucher's SST code from any existing RPC).
-            </p>
-            {computeError && <p className="error">{computeError}</p>}
-          </div>
-
-          <h2 style={{ fontSize: 14, marginTop: 16 }}>SST transactions</h2>
-          {sstTransactions === null ? (
-            <p className="muted">Loading…</p>
-          ) : sstTransactions.length === 0 ? (
-            <p className="muted">No SST computed yet.</p>
-          ) : (
-            <div className="card" style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ textAlign: "left" }}>
-                    <th style={{ padding: 6 }}>Source</th>
-                    <th style={{ padding: 6 }}>SST code</th>
-                    <th style={{ padding: 6 }}>Rate</th>
-                    <th style={{ padding: 6 }}>Taxable amount</th>
-                    <th style={{ padding: 6 }}>SST amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sstTransactions.map((t) => (
-                    <tr key={t.id} style={{ borderTop: "1px solid var(--aifa-border, #e2e2e2)" }}>
-                      <td style={{ padding: 6 }}>{t.invoiceId ? invoiceLabel(invoices, t.invoiceId) : `PV #${(t.paymentVoucherId ?? "").slice(0, 8)}`}</td>
-                      <td style={{ padding: 6 }}>{t.sstCode}</td>
-                      <td style={{ padding: 6 }}>{(t.rate * 100).toFixed(0)}%</td>
-                      <td style={{ padding: 6 }}>RM{t.taxableAmount.toFixed(2)}</td>
-                      <td style={{ padding: 6 }}>RM{t.sstAmount.toFixed(2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <div className="card" style={{ marginTop: 16 }}>
-            <h2 style={{ fontSize: 14, marginTop: 0 }}>New SST return</h2>
-            <div className="row">
-              <input placeholder="Period (e.g. 2026-08)" value={returnPeriod} onChange={(e) => setReturnPeriod(e.target.value)} style={{ padding: 6, width: 160 }} />
-              <button onClick={() => void handleCreateReturn()} disabled={returnBusy || !returnPeriod.trim()}>
-                {returnBusy ? "Creating…" : "Create return"}
-              </button>
-            </div>
-            <p className="muted" style={{ marginTop: 4 }}>
-              Aggregates all SST transactions in the period. "Submit" here is a status flip only — not a real Kastam
-              API integration (per the transport's own note).
-            </p>
-            {returnError && <p className="error">{returnError}</p>}
-          </div>
-
-          <h2 style={{ fontSize: 14, marginTop: 16 }}>SST returns</h2>
-          {sstReturns === null ? (
-            <p className="muted">Loading…</p>
-          ) : sstReturns.length === 0 ? (
-            <p className="muted">No SST returns yet.</p>
-          ) : (
-            sstReturns.map((r) => {
-              const busy = busyId === r.id;
-              return (
-                <div key={r.id} className="card">
-                  <div className="row" style={{ justifyContent: "space-between" }}>
-                    <strong>{r.period}</strong>
-                    <span className="muted">{r.status}</span>
-                  </div>
-                  <p className="muted" style={{ margin: "4px 0" }}>Total output tax: RM{r.totalOutputTax.toFixed(2)}</p>
-                  {r.status === "draft" && (
-                    <div className="row" style={{ marginTop: 6 }}>
-                      <button onClick={() => void handleSubmitReturn(r)} disabled={busy}>
-                        {busy ? "Submitting…" : "Submit (status only — not a real Kastam filing)"}
-                      </button>
-                    </div>
+          <Card
+            title="Compute SST for an invoice"
+            description="Only lines carrying a recognised tax code (set at quotation/invoice line entry) are taxed; lines with no tax code are silently skipped — not an error. Throws if SST was already computed for this invoice."
+          >
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!computeBusy && computeInvoiceId) void handleComputeSst();
+              }}
+            >
+              <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+                <Field label="Invoice">
+                  {(p) => (
+                    <select {...p} className="ui-select" value={computeInvoiceId} onChange={(e) => setComputeInvoiceId(e.target.value)}>
+                      <option value="">Select invoice…</option>
+                      {invoices.map((i) => (
+                        <option key={i.id} value={i.id}>
+                          {i.invoiceNo}
+                        </option>
+                      ))}
+                    </select>
                   )}
-                </div>
-              );
-            })
-          )}
+                </Field>
+                <Button type="submit" variant="primary" loading={computeBusy} disabled={!computeInvoiceId}>
+                  {computeBusy ? "Computing…" : "Compute SST"}
+                </Button>
+              </div>
+              <p className="ui-muted">
+                Payment Voucher SST computation isn't reachable from this page — see this page's own header comment
+                for the disclosed reason (no way to set a Payment Voucher's SST code from any existing RPC).
+              </p>
+              {computeError && (
+                <p className="aifa-alert aifa-alert--danger" role="alert">
+                  {computeError}
+                </p>
+              )}
+            </form>
+          </Card>
+
+          <Card title="SST transactions" flush>
+            <DataTable
+              caption="SST transactions"
+              columns={sstTxColumns}
+              rows={loadError ? [] : sstTransactions}
+              rowKey={(t) => t.id}
+              empty={<div className="ui-table-state">No SST computed yet.</div>}
+            />
+          </Card>
+
+          <Card
+            title="New SST return"
+            description={`Aggregates all SST transactions in the period. "Submit" here is a status flip only — not a real Kastam API integration (per the transport's own note).`}
+          >
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!returnBusy && returnPeriod.trim()) void handleCreateReturn();
+              }}
+            >
+              <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+                <Field label="Period" hint="e.g. 2026-08">
+                  {(p) => <input {...p} className="ui-input" value={returnPeriod} onChange={(e) => setReturnPeriod(e.target.value)} />}
+                </Field>
+                <Button type="submit" variant="primary" loading={returnBusy} disabled={!returnPeriod.trim()}>
+                  {returnBusy ? "Creating…" : "Create return"}
+                </Button>
+              </div>
+              {returnError && (
+                <p className="aifa-alert aifa-alert--danger" role="alert">
+                  {returnError}
+                </p>
+              )}
+            </form>
+          </Card>
+
+          <Card title="SST returns" flush>
+            <DataTable
+              caption="SST returns"
+              columns={returnColumns}
+              rows={loadError ? [] : sstReturns}
+              rowKey={(r) => r.id}
+              empty={<div className="ui-table-state">No SST returns yet.</div>}
+            />
+          </Card>
         </>
       )}
     </div>

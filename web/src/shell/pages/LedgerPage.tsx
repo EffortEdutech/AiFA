@@ -12,11 +12,15 @@
  * business whose only activity has gone through the old pipeline. This
  * is not a query bug; it's the disclosed cutover gap that sprint
  * already named.
+ *
+ * UI polish Phase 4: presentation only — shared header, table and labelled
+ * fields. Same calls, gating and copy.
  */
 import { useCallback, useEffect, useState } from "react";
 
 import type { ChartOfAccount } from "@aifa/core/sync/partyAndLedgerTransport";
 
+import { Button, Card, DataTable, Field, PageHeader, formatDate, formatMoney, humanizeStatus, type Column } from "../../ui";
 import { listChartOfAccounts, generalLedgerDetail, type GeneralLedgerRow } from "../../lib/partiesAndAccounts";
 
 interface Props {
@@ -63,56 +67,62 @@ export function LedgerPage({ businessId }: Props): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId]);
 
+  const columns: Column<GeneralLedgerRow>[] = [
+    { key: "date", header: "Date", render: (r) => formatDate(r.postedAt) },
+    { key: "dir", header: "Direction", render: (r) => humanizeStatus(r.direction) },
+    { key: "amt", header: "Amount", numeric: true, render: (r) => formatMoney(r.amount) },
+    { key: "bal", header: "Running balance", numeric: true, render: (r) => formatMoney(r.runningBalance) },
+  ];
+
   return (
     <div className="aifa-page">
-      <h1>Ledger</h1>
-      <div className="row" style={{ margin: "12px 0" }}>
-        <select value={accountId} onChange={(e) => setAccountId(e.target.value)} style={{ padding: 6 }}>
-          {accounts?.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.accountCode} — {a.accountName}
-            </option>
-          ))}
-        </select>
-        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ padding: 6 }} />
-        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ padding: 6 }} />
-        <button onClick={() => void runQuery()} disabled={loading}>
-          {loading ? "Loading…" : "Refresh"}
-        </button>
-      </div>
+      <PageHeader title="Ledger" description="Posted entries for one account, with a running balance." />
 
-      {error && <p className="error">{error}</p>}
-      {rows === null ? (
-        <p className="muted">Loading…</p>
-      ) : rows.length === 0 ? (
-        <p className="muted">
-          No entries in this range. If this account should have real activity, see this page's own note on the
-          local-first-vs-server-ledger cutover gap (Sprint 26).
-        </p>
-      ) : (
-        <div className="card" style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--aifa-font-size-table)" }}>
-            <thead>
-              <tr style={{ textAlign: "left", borderBottom: "1px solid var(--aifa-border)" }}>
-                <th style={{ padding: 6 }}>Date</th>
-                <th style={{ padding: 6 }}>Direction</th>
-                <th style={{ padding: 6 }}>Amount</th>
-                <th style={{ padding: 6 }}>Running balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.entryId} style={{ borderBottom: "1px solid var(--aifa-border)" }}>
-                  <td style={{ padding: 6 }}>{new Date(r.postedAt).toLocaleDateString()}</td>
-                  <td style={{ padding: 6 }}>{r.direction}</td>
-                  <td style={{ padding: 6 }}>RM{r.amount.toFixed(2)}</td>
-                  <td style={{ padding: 6 }}>RM{r.runningBalance.toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <Card>
+        <div className="ui-inline-actions" style={{ alignItems: "flex-end" }}>
+          <Field label="Account">
+            {(p) => (
+              <select {...p} className="ui-select" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+                {accounts?.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.accountCode} — {a.accountName}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+          <Field label="From">
+            {(p) => <input {...p} className="ui-input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />}
+          </Field>
+          <Field label="To">
+            {(p) => <input {...p} className="ui-input" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />}
+          </Field>
+          <Button variant="secondary" loading={loading} onClick={() => void runQuery()}>
+            {loading ? "Loading…" : "Refresh"}
+          </Button>
         </div>
+      </Card>
+
+      {error && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {error}
+        </p>
       )}
+
+      <Card flush>
+        <DataTable
+          caption="Ledger entries"
+          columns={columns}
+          rows={error ? [] : rows}
+          rowKey={(r) => r.entryId}
+          empty={
+            <div className="ui-table-state">
+              No entries in this range. If this account should have real activity, see this page's own note on the
+              local-first-vs-server-ledger cutover gap (Sprint 26).
+            </div>
+          }
+        />
+      </Card>
     </div>
   );
 }

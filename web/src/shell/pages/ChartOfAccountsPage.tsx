@@ -5,12 +5,16 @@
  * the auto-seeded Phase 1 system accounts (`isSystem: true`) cannot be
  * created/edited/deleted from here or anywhere — no RPC offers that,
  * by design (Vol 11_1 §4.1).
+ *
+ * UI polish Phase 4: presentation only — shared header, table and labelled
+ * fields. Same calls, gating and copy.
  */
 import { useCallback, useEffect, useState } from "react";
 
 import { createSupabasePartyAndLedgerTransport } from "@aifa/core/sync/partyAndLedgerTransport";
 import type { AccountType, ChartOfAccount } from "@aifa/core/sync/partyAndLedgerTransport";
 
+import { Button, Card, DataTable, Field, PageHeader, StatusPill, type Column } from "../../ui";
 import { supabase } from "../../lib/supabaseClient";
 import { listChartOfAccounts } from "../../lib/partiesAndAccounts";
 import { TabStrip } from "../TabStrip";
@@ -70,63 +74,83 @@ export function ChartOfAccountsPage({ businessId }: Props): JSX.Element {
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="aifa-page">
-        <h1>Chart of Accounts</h1>
-        <p className="error">{loadError}</p>
-      </div>
-    );
-  }
-
   const filtered = (accounts ?? []).filter((a) => a.accountType === tab);
+
+  const columns: Column<ChartOfAccount>[] = [
+    { key: "code", header: "Code", render: (a) => <strong>{a.accountCode}</strong> },
+    { key: "name", header: "Account name", render: (a) => a.accountName },
+    { key: "system", header: "", render: (a) => (a.isSystem ? <StatusPill status="neutral" label="System" tone="neutral" /> : null) },
+  ];
 
   return (
     <div className="aifa-page">
-      <h1>Chart of Accounts</h1>
-      <TabStrip tabs={ACCOUNT_TYPES.map((t) => ({ id: t, label: t[0].toUpperCase() + t.slice(1) }))} active={tab} onChange={setTab} />
+      <PageHeader
+        title="Chart of Accounts"
+        actions={
+          <Button variant="primary" icon={showCreate ? undefined : "plus"} onClick={() => setShowCreate((s) => !s)}>
+            {showCreate ? "Cancel" : "New custom account"}
+          </Button>
+        }
+      >
+        <TabStrip tabs={ACCOUNT_TYPES.map((t) => ({ id: t, label: t[0].toUpperCase() + t.slice(1) }))} active={tab} onChange={setTab} />
+      </PageHeader>
 
-      <div className="row" style={{ margin: "12px 0" }}>
-        <button onClick={() => setShowCreate((s) => !s)}>{showCreate ? "Cancel" : "New custom account"}</button>
-      </div>
+      {loadError && (
+        <p className="aifa-alert aifa-alert--danger" role="alert">
+          {loadError}
+        </p>
+      )}
 
       {showCreate && (
-        <div className="card">
-          <h2 style={{ fontSize: 16, marginTop: 0 }}>New custom account</h2>
-          <div className="row">
-            <input placeholder="Account code" value={code} onChange={(e) => setCode(e.target.value)} style={{ padding: 6, width: 140 }} />
-            <input placeholder="Account name" value={name} onChange={(e) => setName(e.target.value)} style={{ padding: 6, flex: 1 }} />
-            <select value={type} onChange={(e) => setType(e.target.value as AccountType)} style={{ padding: 6 }}>
-              {ACCOUNT_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-            <button onClick={() => void handleCreate()} disabled={createBusy || !code.trim() || !name.trim()}>
-              {createBusy ? "Creating…" : "Create"}
-            </button>
-          </div>
-          {createError && <p className="error">{createError}</p>}
-        </div>
+        <Card title="New custom account">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!createBusy && code.trim() && name.trim()) void handleCreate();
+            }}
+          >
+            <div className="ui-form-grid">
+              <Field label="Account code" required>
+                {(p) => <input {...p} className="ui-input" value={code} onChange={(e) => setCode(e.target.value)} />}
+              </Field>
+              <Field label="Account name" required>
+                {(p) => <input {...p} className="ui-input" value={name} onChange={(e) => setName(e.target.value)} />}
+              </Field>
+              <Field label="Type">
+                {(p) => (
+                  <select {...p} className="ui-select" value={type} onChange={(e) => setType(e.target.value as AccountType)}>
+                    {ACCOUNT_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+            </div>
+            <div className="ui-form-actions">
+              <Button type="submit" variant="primary" loading={createBusy} disabled={!code.trim() || !name.trim()}>
+                {createBusy ? "Creating…" : "Create"}
+              </Button>
+            </div>
+            {createError && (
+              <p className="aifa-alert aifa-alert--danger" role="alert">
+                {createError}
+              </p>
+            )}
+          </form>
+        </Card>
       )}
 
-      {accounts === null ? (
-        <p className="muted">Loading…</p>
-      ) : filtered.length === 0 ? (
-        <p className="muted">No {tab} accounts.</p>
-      ) : (
-        filtered.map((a) => (
-          <div key={a.id} className="card">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <strong>
-                {a.accountCode} — {a.accountName}
-              </strong>
-              {a.isSystem && <span className="muted">System</span>}
-            </div>
-          </div>
-        ))
-      )}
+      <Card flush>
+        <DataTable
+          caption={`${tab} accounts`}
+          columns={columns}
+          rows={loadError ? [] : accounts === null ? null : filtered}
+          rowKey={(a) => a.id}
+          empty={<div className="ui-table-state">No {tab} accounts.</div>}
+        />
+      </Card>
     </div>
   );
 }
