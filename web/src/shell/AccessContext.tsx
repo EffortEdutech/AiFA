@@ -70,7 +70,15 @@ export function AccessProvider({
   const [testOverride, setTestOverride] = useState<VisibleDomains | null>(null);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId) {
+      // No signed-in user means the dev-bypass path (App only mounts this
+      // provider without a session via the DEV-only bypass): there is no
+      // membership to look up, so resolve to the unrestricted default
+      // instead of staying "unchecked" forever (which hid every
+      // membership-scoped row, e.g. the Devices table).
+      setMembershipChecked(true);
+      return;
+    }
     let cancelled = false;
     getMyActiveMembership(businessId, userId)
       .then(async (membership) => {

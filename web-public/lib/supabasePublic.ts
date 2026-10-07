@@ -24,7 +24,46 @@ import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
+/**
+ * DEV-ONLY seed mode: `AIFA_SEED_MODE=1 npm run dev` serves one fictional
+ * business (slug "kedai-contoh") without any Supabase env vars, so the
+ * Public Site can be reviewed offline. Ignored in production builds
+ * (NODE_ENV === "production"); the contact form is refused (read-only).
+ */
+const SEED_BUSINESS_ID = "00000000-0000-4000-8000-000100000001";
+const seedContent = {
+  business_id: SEED_BUSINESS_ID,
+  hero_headline: "Fresh food, fair prices",
+  hero_subtext: "Sample copy for the seeded business. Catering and wholesale for offices, events and cafes.",
+  services: [
+    { name: "Catering", description: "Event and office catering." },
+    { name: "Wholesale", description: "Bulk supply for cafes." },
+    { name: "Gift hampers", description: "Festive hampers made to order." },
+  ],
+  contact_email: "hello@kedai-contoh.example",
+  contact_phone: "+60 12-345 6789",
+  accent_color: "#2f6f5e",
+};
+
+function createSeedClient() {
+  const ok = (data: unknown) => Promise.resolve({ data, error: null });
+  return {
+    rpc(name: string, args: Record<string, unknown> = {}) {
+      if (name === "resolve_business_slug") return ok(args.p_slug === "kedai-contoh" ? SEED_BUSINESS_ID : null);
+      if (name === "get_public_business_name") return ok("Kedai Contoh Sdn Bhd");
+      return Promise.resolve({ data: null, error: { message: "Seed mode is read-only." } });
+    },
+    from() {
+      const q = { select: () => q, eq: () => q, maybeSingle: () => ok(seedContent) };
+      return q;
+    },
+  };
+}
+
 export function getPublicSupabaseClient() {
+  if (process.env.NODE_ENV !== "production" && process.env.AIFA_SEED_MODE === "1") {
+    return createSeedClient() as unknown as ReturnType<typeof createClient>;
+  }
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error(
       "Missing Supabase config. Set NEXT_PUBLIC_SUPABASE_URL and " +

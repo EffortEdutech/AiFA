@@ -145,7 +145,7 @@ const eSignatureEnvelopes: Row[] = [
 ];
 
 const payrollRuns: Row[] = [
-  { id: id(70, 1), business_id: SEED_BUSINESS_ID, period: "2026-08", status: "finalized", total_net_pay: 8120, created_by_membership_id: ME, created_at: iso(-35) },
+  { id: id(70, 1), business_id: SEED_BUSINESS_ID, period: "2026-08", status: "approved", total_net_pay: 8120, created_by_membership_id: ME, created_at: iso(-35) },
   { id: id(70, 2), business_id: SEED_BUSINESS_ID, period: "2026-09", status: "draft", total_net_pay: 8120, created_by_membership_id: ME, created_at: iso(-5) },
 ];
 const payslips: Row[] = [6, 7, 8].flatMap((p, i) => [1, 2].map((r) => ({
@@ -188,13 +188,14 @@ const eInvoiceSubmissions: Row[] = [
   { id: id(82, 1), business_id: SEED_BUSINESS_ID, invoice_id: id(30, 1), lhdn_uuid: "SIM-0000-AAAA", qr_code_ref: null, submission_type: "invoice", consolidated_period: null, status: "valid", irb_response_ref: "SIMULATED", submitted_at: iso(-39), created_by_membership_id: ME, created_at: iso(-39) },
 ];
 const sstRates: Row[] = [
-  { id: id(83, 1), business_id: SEED_BUSINESS_ID, code: "SST-SVC-8", label: "Service tax 8%", rate: 8, created_at: iso(-100) },
+  { sst_code: "SST-SVC-8", tax_type: "service_tax", rate: 0.08, description: "Service tax 8% (sample)", rule_version: "2026-sample" },
+  { sst_code: "SST-SALES-10", tax_type: "sales_tax", rate: 0.1, description: "Sales tax 10% (sample)", rule_version: "2026-sample" },
 ];
 const businesses: Row[] = [
   { id: SEED_BUSINESS_ID, owner_user_id: SEED_USER_ID, legal_name: "Kedai Contoh Sdn Bhd", industry: "retail", pka_version: "1", created_at: iso(-200), access_model_override: null, commission_trigger_status: "paid", ssm_registration_number: "202001000001 (sample)", slug: "kedai-contoh" },
 ];
 const publicSiteContent: Row[] = [
-  { business_id: SEED_BUSINESS_ID, hero_headline: "Fresh food, fair prices", hero_subtext: "Sample copy for the seeded business.", services: [{ title: "Catering", description: "Event and office catering." }, { title: "Wholesale", description: "Bulk supply for cafes." }], contact_email: "hello@kedai-contoh.example", contact_phone: "+60 12-345 6789", accent_color: "#2f6f5e", published_at: iso(-10), updated_at: iso(-10) },
+  { business_id: SEED_BUSINESS_ID, hero_headline: "Fresh food, fair prices", hero_subtext: "Sample copy for the seeded business.", services: [{ name: "Catering", description: "Event and office catering." }, { name: "Wholesale", description: "Bulk supply for cafes." }], contact_email: "hello@kedai-contoh.example", contact_phone: "+60 12-345 6789", accent_color: "#2f6f5e", published_at: iso(-10), updated_at: iso(-10) },
 ];
 
 export const SEED_TABLES: Record<string, Row[]> = {

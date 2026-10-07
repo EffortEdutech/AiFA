@@ -31,6 +31,9 @@ Then click **Skip sign-in (dev only, no backend)** and **Skip (dev only, no back
 - Sample data lives in `web/src/dev/seedData.ts`; the mode is compiled out of production builds.
 - Close the dev server (or `Remove-Item Env:VITE_SEED_MODE`) before a normal run.
 
+- Payroll: the 2026-08 run is **Approved** (select it, then "Generate bulk payment file" to reach the Maybank2u warning panel); 2026-09 is Draft.
+- **Public Site** seed mode (no env vars needed): `cd web-public ; $env:AIFA_SEED_MODE = "1" ; npm run dev`, then open `http://localhost:3000/site/kedai-contoh` (landing page) and `/site/anything-else` (404). The contact form is refused (read-only) by design.
+
 Otherwise sign in with the owner-provided test account (ask if none). For the Public Site: `cd web-public ; npm run dev` (Next.js, usually http://localhost:3000; open `/site/<slug>` using the slug shown in Settings → Public Site).
 
 Test at three widths: **1440 px, 1024 px, 390 px (phone)**. Test once in OS dark mode (the app is pinned to light; confirm controls are NOT dark/black).
@@ -49,7 +52,7 @@ Test at three widths: **1440 px, 1024 px, 390 px (phone)**. Test once in OS dark
 
 | # | Sidebar item | Specific checks |
 |---|---|---|
-| 1 | Overview → Business Overview | Stat tiles; Today / Money Moves tab; move cards; tab switching works |
+| 1 | Overview → Business Overview | Stat tiles; Today / Money Moves tab; move cards; tab switching works; Snapshot tab: Accounts Payable shows RM0.00 with the "Always RM0.00 — Payment Vouchers post cash-basis…" label |
 | 2 | Capture → Quick Capture (AI) | Drop-zone highlight on drag-over; capture list; resolve form selects labelled (Payment method, Clock type, Contract type); WhatsApp copy still says nothing is sent until you tap Send |
 | 3 | Capture → Forward to AiFA | Drop-zone and "browse" link keyboard-reachable; file input works |
 | 4 | Sales → Parties | List + form; checkbox group; validation messages |
@@ -58,7 +61,7 @@ Test at three widths: **1440 px, 1024 px, 390 px (phone)**. Test once in OS dark
 | 7 | Sales → Invoices | List, status pills, create form |
 | 8 | Sales → Payments & Credit Notes | Tabs, forms, tables |
 | 9 | Sales → AR Ageing | Buckets, money alignment |
-| 10 | Purchases & Cash → Payment Vouchers | List/form; AP RM0.00 disclosure label still visible |
+| 10 | Purchases & Cash → Payment Vouchers | List/form render with seeded vouchers (the AP RM0.00 label is NOT on this page; it lives on Business Overview → Snapshot, row 1) |
 | 11 | Purchases & Cash → Expense | Form labels, validation |
 | 12 | Purchases & Cash → Purchase Orders | Table, actions |
 | 13 | Purchases & Cash → Cash Book / P&L | Tabs, totals |
@@ -90,7 +93,7 @@ Return a markdown report:
 - **Pass/fail table**: one row per page above → `PASS` / `FAIL` / `BLOCKED` + one-line note.
 - **Findings**: for each FAIL: page, width, steps to reproduce, expected vs actual, severity (blocker / major / minor / cosmetic), screenshot filename.
 - **Console errors/warnings** list.
-- **Disclosure check**: confirm each of these is visible where expected — AP RM0.00 label; e-Invoice SIMULATED banner (both tabs); e-Signature SIMULATED banner; Balance Sheet banner; tax-report placeholder; Maybank2u warning; PCB caveat; read-only device notice; WhatsApp "nothing is sent until you tap Send"; solo/team approval notes.
+- **Disclosure check**: confirm each of these is visible where expected — AP RM0.00 label (Business Overview → Snapshot tab); e-Invoice SIMULATED banner (both tabs); e-Signature SIMULATED banner; Balance Sheet banner; tax-report placeholder; Maybank2u warning; PCB caveat; read-only device notice; WhatsApp "nothing is sent until you tap Send"; solo/team approval notes.
 - **Not verified** and why.
 
 Save screenshots under `docs/ui-polish-walkthrough/` (create it) and the report as `docs/ui-polish-walkthrough/REPORT.md`. Do not commit; leave that to the owner.
