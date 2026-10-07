@@ -43,3 +43,7 @@ supabase/snippets/
 
 # Node modules recovery folder from Sprint 14 incident - delete manually
 _to_delete/
+
+docs/ui-polish-walkthrough/
+debug/edge-ui-walkthrough/
+debug/edge-ui-walkthrough-seed/
