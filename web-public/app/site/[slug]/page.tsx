@@ -78,9 +78,10 @@ function shorten(text: string, max: number): string {
 export async function generateMetadata({
   params,
 }: {
-  params: { slug: string };
+  params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
-  const site = await loadSite(params.slug);
+  const { slug } = await params;
+  const site = await loadSite(slug);
   if (!site) return { title: "Page not found", robots: { index: false } };
 
   const name = site.businessName;
@@ -103,9 +104,10 @@ export async function generateMetadata({
 export default async function BusinessSitePage({
   params,
 }: {
-  params: { slug: string };
+  params: Promise<{ slug: string }>;
 }) {
-  const site = await loadSite(params.slug);
+  const { slug } = await params;
+  const site = await loadSite(slug);
   if (!site) notFound();
 
   const { businessId, businessName, content } = site;
