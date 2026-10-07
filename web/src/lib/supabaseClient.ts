@@ -1,4 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { seedSupabase } from "../dev/seedClient";
 
 /**
  * Backend client — Vol 12_0 §6 ("Same Supabase project already in use...
@@ -17,18 +18,28 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as
   | string
   | undefined;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
-    "Missing Supabase config. Copy .env.example to .env and fill in " +
-      "VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY from your Supabase " +
-      "project settings (see README.md).",
-  );
+/** DEV-ONLY: `VITE_SEED_MODE=1 npm run dev` swaps in a read-only fake client
+ * with sample data (src/dev/). Both operands are compile-time constants, so
+ * production builds drop the fake client entirely. */
+const seedMode = import.meta.env.DEV && import.meta.env.VITE_SEED_MODE === "1";
+
+function createRealClient(): SupabaseClient {
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error(
+      "Missing Supabase config. Copy .env.example to .env and fill in " +
+        "VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY from your Supabase " +
+        "project settings (see README.md).",
+    );
+  }
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: false,
+    },
+  });
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
-  },
-});
+export const supabase: SupabaseClient = seedMode
+  ? (seedSupabase as unknown as SupabaseClient)
+  : createRealClient();

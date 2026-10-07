@@ -7,7 +7,7 @@ Branch: `ui-polish`. Goal: visually and functionally verify every page restyled 
 1. Read `AGENTS.md` first. Never open, print or paste `.env*` files or any key/secret. If env vars are needed, ask the owner.
 2. Do NOT click destructive or irreversible actions: Remove/Suspend member, Revoke device, Mark Paid, Submit for approval, Submit (simulated), Create/Send anything, Publish Changes, Sign out, Decrypt (payroll key). Opening forms and typing in them is fine; **cancel before submitting**. Exception: if the owner supplied a disposable test business, you may create records there.
 3. Use only the repo's own commands. No new dependencies.
-4. If a page cannot load because data/auth is unavailable, record "blocked: <reason>" and move on; do not fake data.
+4. Use seed mode (see Setup) so data-backed pages render. If a page still cannot load, record "blocked: <reason>" and move on; do not fake data.
 
 ## Setup
 
@@ -16,7 +16,22 @@ cd web
 npm run typecheck ; npm run lint      # both must pass
 npm run dev                            # note the printed local URL (Vite, usually http://localhost:5173)
 ```
-Sign in with the owner-provided test account (ask if none). For the Public Site: `cd web-public ; npm run dev` (Next.js, usually http://localhost:3000; open `/site/<slug>` using the slug shown in Settings → Public Site).
+**Seeded-data mode (no backend, no account, no `.env` needed).** Prefer this when no test account exists:
+
+```powershell
+cd web
+$env:VITE_SEED_MODE = "1"
+npm run dev
+```
+Then click **Skip sign-in (dev only, no backend)** and **Skip (dev only, no backend)** on the device screen. Every page is served fictional sample data for "Kedai Contoh Sdn Bhd" (parties, invoices in every status, quotations, vouchers, POs, DOs, payroll runs and payslips, contracts, members, devices, approvals, reports). Notes:
+
+- It is **read-only**: any create/update/delete/RPC write returns the error "Seed mode is read-only". That error text is expected; check it is displayed as a styled alert, not a raw stack. Do not treat it as a bug.
+- The top bar shows **Read-only** / "Another device is currently active" in this mode; that is normal.
+- Business name/industry in Settings come from local storage, so they show "—".
+- Sample data lives in `web/src/dev/seedData.ts`; the mode is compiled out of production builds.
+- Close the dev server (or `Remove-Item Env:VITE_SEED_MODE`) before a normal run.
+
+Otherwise sign in with the owner-provided test account (ask if none). For the Public Site: `cd web-public ; npm run dev` (Next.js, usually http://localhost:3000; open `/site/<slug>` using the slug shown in Settings → Public Site).
 
 Test at three widths: **1440 px, 1024 px, 390 px (phone)**. Test once in OS dark mode (the app is pinned to light; confirm controls are NOT dark/black).
 
