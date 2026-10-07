@@ -228,6 +228,29 @@
 .ui-select[aria-invalid="true"],
 .ui-textarea[aria-invalid="true"] { border-color: var(--aifa-danger); }
 
+/* ----- Password field with show/hide toggle ----- */
+.ui-password { position: relative; display: flex; }
+.ui-password__input { padding-right: 40px; }
+.ui-password__toggle {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  color: var(--aifa-text-muted);
+  border: 0;
+  border-radius: var(--aifa-radius-sm);
+  cursor: pointer;
+}
+.ui-password__toggle:hover { color: var(--aifa-text); }
+.ui-password__toggle:focus-visible { outline: none; box-shadow: var(--aifa-focus-ring); }
+
 /* ----- Dialog ----- */
 .ui-overlay {
   position: fixed;

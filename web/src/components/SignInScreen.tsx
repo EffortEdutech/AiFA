@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 
 import { signIn, signUp } from "../lib/auth";
 import { AuthLayout } from "../shell/AuthLayout";
-import { Button, Field } from "../ui";
+import { Button, Field, PasswordInput } from "../ui";
 
 interface Props {
   /**
@@ -96,10 +96,8 @@ export function SignInScreen({ onDevBypass }: Props): JSX.Element {
         </Field>
         <Field label="Password">
           {(p) => (
-            <input
+            <PasswordInput
               {...p}
-              className="ui-input"
-              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete={isSignUp ? "new-password" : "current-password"}
