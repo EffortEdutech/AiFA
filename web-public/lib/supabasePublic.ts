@@ -28,7 +28,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
  * DEV-ONLY seed mode: `AIFA_SEED_MODE=1 npm run dev` serves one fictional
  * business (slug "kedai-contoh") without any Supabase env vars, so the
  * Public Site can be reviewed offline. Ignored in production builds
- * (NODE_ENV === "production"); the contact form is refused (read-only).
+ * (NODE_ENV === "production"); requests are simulated and nothing is saved.
  */
 const SEED_BUSINESS_ID = "00000000-0000-4000-8000-000100000001";
 const seedContent = {
@@ -51,6 +51,30 @@ function createSeedClient() {
     rpc(name: string, args: Record<string, unknown> = {}) {
       if (name === "resolve_business_slug") return ok(args.p_slug === "kedai-contoh" ? SEED_BUSINESS_ID : null);
       if (name === "get_public_business_name") return ok("Kedai Contoh Sdn Bhd");
+      if (name === "get_current_business_slug") return ok(args.p_slug === "kedai-contoh" ? "kedai-contoh" : null);
+      if (name === "submit_public_request_v2") {
+        return ok({ reference_code: "RQ-DEMO23", tracking_token: "a".repeat(64) });
+      }
+      if (name === "get_request_tracking") {
+        if (args.p_token !== "a".repeat(64)) return ok(null);
+        return ok({
+          reference_code: "RQ-DEMO23",
+          request_type: "rfq",
+          status: "replied",
+          created_at: new Date().toISOString(),
+          business_name: "Kedai Contoh Sdn Bhd",
+          business_slug: "kedai-contoh",
+          customer_name: "Sample Customer",
+          message: "Sample request used in seed mode.",
+          items: [{ description: "Nasi lemak catering box", quantity: "50" }],
+          needed_by: null,
+          delivery_area: "Shah Alam",
+          events: [
+            { kind: "received", status: "new", body: null, created_at: new Date().toISOString() },
+            { kind: "reply", status: "replied", body: "Thanks! We can supply 50 boxes. Quotation to follow.", created_at: new Date().toISOString() },
+          ],
+        });
+      }
       return Promise.resolve({ data: null, error: { message: "Seed mode is read-only." } });
     },
     from() {

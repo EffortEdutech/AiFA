@@ -19,13 +19,12 @@
 // (lib/color.ts), email/phone/WhatsApp links (lib/contact.ts), a designed
 // "not published yet" page, page metadata, and drops the About section that
 // only repeated the hero text.
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 
 import { buildTheme } from "../../../lib/color";
 import { emailHref, telHref, whatsAppHref } from "../../../lib/contact";
 import { getPublicSupabaseClient } from "../../../lib/supabasePublic";
-import { ContactForm } from "./ContactForm";
 
 export const revalidate = 0; // publishing is explicit (Publish Changes), always read fresh
 
@@ -110,7 +109,11 @@ export default async function BusinessSitePage({
   const site = await loadSite(slug);
   if (!site) notFound();
 
-  const { businessId, businessName, content } = site;
+  // A renamed slug keeps working (printed QR codes); send visitors to the current address.
+  const { data: currentSlug } = await getPublicSupabaseClient().rpc("get_current_business_slug", { p_slug: slug });
+  if (typeof currentSlug === "string" && currentSlug !== slug) redirect(`/site/${currentSlug}`);
+
+  const { businessName, content } = site;
 
   if (!content) {
     return (
@@ -178,8 +181,8 @@ export default async function BusinessSitePage({
             <h1 className="site-hero__title">{headline}</h1>
             {subtext && <p className="site-hero__sub">{subtext}</p>}
             <div className="site-hero__actions">
-              <a className="site-btn site-btn--hero" href="#contact">
-                Get in touch
+              <a className="site-btn site-btn--hero" href={`/site/${slug}/request?type=rfq`}>
+                Request a quote
               </a>
               {whatsAppLink ? (
                 <a
@@ -229,7 +232,7 @@ export default async function BusinessSitePage({
               Contact
             </h2>
             <p className="site-section__lead">
-              Send us a message and we&apos;ll get back to you
+              Ask a question or request a quote and we&apos;ll get back to you
               {hasContactDetails ? ", or reach us directly." : "."}
             </p>
             <div className="site-contact">
@@ -263,7 +266,15 @@ export default async function BusinessSitePage({
                   )}
                 </ul>
               )}
-              <ContactForm businessId={businessId} />
+              <div className="site-form req-cta">
+                <a className="site-btn site-btn--solid" href={`/site/${slug}/request?type=contact`}>
+                  Ask a question
+                </a>
+                <a className="site-btn site-btn--outline" href={`/site/${slug}/request?type=rfq`}>
+                  Request a quote
+                </a>
+                <p className="req-note">You will get a private link to follow the reply.</p>
+              </div>
             </div>
           </div>
         </section>
