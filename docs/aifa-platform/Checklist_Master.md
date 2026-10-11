@@ -14,7 +14,7 @@
 | 65 | Domain Binding | DONE (backend + UI) — see close-out note below; real-domain DNS test still owner-pending | Real domain added, DNS-verified, routes to correct `business_id` |
 | 66 | Public Homepage Renderer | DONE (backend) — see close-out note below; real-domain-in-browser test still owner-pending | Bound domain shows real, owner-edited homepage content in a real browser |
 | 67 | No-Login Transactional Pages | Not started | Real invoice produces a working pay link; paying it updates status both sides |
-| 68 | RFQ/PO Submission + Tracking | Not started | Real RFQ becomes a real Approval Task; progress reflects on public Tracking page |
+| 68 | Customer Requests (QR intake, Requests inbox, RFQ to quotation) | IN PROGRESS: 68a built and DB-verified live (11 October 2026); 68b, 68c not started | Customer scans QR, submits a request; owner sees and answers it in Sales → Requests; customer sees the reply on the tracking page |
 | 69 | End-to-End Pilot & Hardening | Not started | Full loop runs live on a real domain; regression pass + honest close-out |
 
 ## Pre-conditions before Sprint 63 starts

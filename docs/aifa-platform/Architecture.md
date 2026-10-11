@@ -52,7 +52,7 @@ See `Checklist_Master.md`'s Sprint 63 close-out note for the full live regressio
 
 - **`public_site_content`** — one row per Client Business: hero text, services, contact info, accent colour, bound domain. Written only when an Owner clicks "Publish Changes" on the Website settings page (the mockup already shows exactly this button) — the client decrypts locally as always, then calls a publish RPC that writes plaintext into this table. Nothing here is decrypted server-side; it is written in plaintext because the Owner chose to make it public.
 - **`public_documents`** — a deliberately published, point-in-time snapshot of one invoice, quotation, or e-signature document (amount, line items, status, an unguessable access token) — created when the Owner's device sends that document to an External Party. This is a snapshot, not a live decrypt-on-demand view: the encrypted ledger of record never leaves the local-first path; only what one page needs to render is copied out, deliberately, at send-time.
-- **`requests`** / **`request_status_events`** — inbound RFQ/PO/enquiry submissions from End Customers (no auth) and the timeline entries a Tracking Page renders. These originate *outside* the encrypted store entirely — an End Customer has no device and no DEK — so they land here first, then get pulled into the Owner's real Workspace through the **existing** Universal Input Router / Approval Task pipeline (Phase 5, Vol 5_5) once accepted.
+- **`requests`** / **`request_status_events`** — inbound enquiry and quote-request submissions from End Customers (no auth) and the timeline entries a Tracking Page renders. These originate *outside* the encrypted store entirely — an End Customer has no device and no DEK — so they live here and the owner works them in the Sales → Requests inbox (§2.5). A quote request is turned into a quotation draft by the owner's own device, so only that quotation enters the encrypted books.
 
 This keeps the payroll/ledger/local-first guarantee (Vol 4_4, Vol 13_1 §8 Path A/B) completely untouched, while making every public-facing surface in the ontology possible. It also explains, in hindsight, why the mockup's Website editor already had a "Publish Changes" button rather than live-editing a shared record — that instinct was the right one.
 
@@ -68,7 +68,17 @@ This keeps the payroll/ledger/local-first guarantee (Vol 4_4, Vol 13_1 §8 Path 
 
 ### 2.5 Request / Tracking Flow
 
-Builds directly on the existing Universal Input Router (Phase 5, Vol 5_5) rather than inventing a parallel pipeline: an accepted public Request becomes a `chained_intake` / `ApprovalTask` in the Owner's Workspace, reusing the exact status machinery an End Customer sees reflected back on their Tracking Page — no new state machine needed.
+**Revised 11 October 2026 (owner decision, Sprint 68).** The first draft of this section routed every public Request into the Universal Input Router as a `chained_intake` / `ApprovalTask`. That is withdrawn: an Approval Task is a staff sign-off item, and a solo owner has nothing to approve. Customer requests instead get their own **Sales → Requests inbox**, built from the Owner Console.
+
+The flow, end to end:
+
+1. The owner shares a QR code or link (Business Settings → Public Site). It opens the public page or goes straight to the request form, tagged with a source label (`?src=counter`) so each request records which QR brought it in.
+2. The customer submits an **enquiry** (`contact`) or a **quote request** (`rfq`; `po` is reserved) through `submit_public_request_v2()`, the only way a visitor creates a request. All validation is enforced in the database, not only in the web layer: field limits, a link cap, explicit consent, and rate limits of 5 per hashed IP per business per hour and 30 per business per hour. The browser adds a honeypot and a minimum form time.
+3. The customer receives a **reference code** (`RQ-XXXXXX`, not a credential) and a private **tracking link** (`/track/<token>`, a 64-character random token). The tracking page is read-only, never indexed, and never shows the customer's phone or email.
+4. The owner sees the request in **Sales → Requests** (capability `sales:view`), replies, changes status (`new`, `seen`, `replied`, `quoted`, `closed`, `spam`) and keeps private notes. Replies reach the customer on the tracking page and through an owner-tapped WhatsApp message; there is no email service yet. Each change appends a `request_status_events` row, and only rows marked `is_public` reach the tracking page.
+5. A quote request can be turned into a quotation draft (match or create the party, prefill the quotation), after which the request moves to `quoted`.
+
+Supporting pieces: `slug_aliases` keep printed QR codes working after a slug rename; `request_throttle` holds only salted IP hashes for rate limiting. Closed requests are deleted after 24 months (wording to be reviewed for PDPA; not legal advice). Customers are told, in the form and in the owner's QR card, that what they submit is stored as plain text and visible to the business (see §2.3 and §5).
 
 ## 3. Explicitly deferred, unaffected by this initiative
 
@@ -83,8 +93,10 @@ Builds directly on the existing Universal Input Router (Phase 5, Vol 5_5) rather
 | `domains` | Optional, Operator-configured custom domain → `business_id` binding, verification state | Plaintext (not sensitive) |
 | `public_site_content` | Published homepage content per Client Business | Plaintext by design (Section 2.3) |
 | `public_documents` | Published snapshot of one invoice/quotation/e-sign doc + access token | Plaintext by design (Section 2.3) |
-| `requests` | Inbound RFQ/PO/enquiry from an End Customer | Plaintext (never touches the encrypted store until accepted) |
-| `request_status_events` | Timeline entries for the Tracking Page | Plaintext |
+| `requests` | Inbound enquiry / quote request from an End Customer, with reference code, tracking token and contact details | Plaintext (never touches the encrypted store; the owner reads it in the Requests inbox) |
+| `request_status_events` | Timeline entries; `is_public` decides what the Tracking Page shows | Plaintext |
+| `slug_aliases` | Old slugs that still resolve after a rename (printed QR codes keep working) | Plaintext (not sensitive) |
+| `request_throttle` | Salted IP hash per accepted submission, for rate limiting only | Plaintext (hash, never the IP) |
 
 ## 5. Security notes
 
@@ -96,7 +108,7 @@ Builds directly on the existing Universal Input Router (Phase 5, Vol 5_5) rather
 
 - Builds on Vol 8_1, Vol 13_1, Vol 13_4 — reuses their schema and RPCs; does not replace or restate them.
 - Vol 4_4 and Vol 13_1 §8 remain the governing local-first encryption model; Section 2.3 above is this initiative's own boundary decision around them, not a change to those volumes.
-- Phase 5 (Universal Input Router, Vol 5_5) is reused as-is for Request intake (Section 2.5).
+- Request intake (Section 2.5) does not use the Phase 5 Universal Input Router or Approval Tasks (changed 11 October 2026); it has its own Sales → Requests inbox.
 - Supersedes nothing in Vol 10_1 (Multi-Tenant Architecture) — that volume frames an *enterprise administrator over several subsidiary tenants*; this initiative is a different shape (many independent SME Client Businesses, each self-service), and the two should be reconciled explicitly if they are ever needed together.
 
 ---

@@ -17,16 +17,30 @@
  */
 import { supabase } from "./supabaseClient";
 
-/** The base path a business's default AiFA-hosted landing page lives under.
- * Until aifa.com itself is live, this resolves against the Supabase
- * project's own functions URL with the slug as an explicit query param
- * (see public-homepage/index.ts's own resolution order) — the link still
- * works today, and moves to a clean aifa.com/site/<slug> path with no
- * change needed on this side once that domain exists. */
-const SUPABASE_FUNCTIONS_URL = "https://yotapuotkbyyocraraza.supabase.co/functions/v1/public-homepage";
+/** Where the public site (web-public, on Vercel) is served from. Override with
+ * VITE_PUBLIC_SITE_URL when aifa.com is attached; no code change needed then.
+ * (Sprint 68a: this used to point at the Supabase functions URL, which cannot
+ * serve a browsable page -- see web-public/README.md.) */
+const PUBLIC_SITE_BASE = (
+  (import.meta.env.VITE_PUBLIC_SITE_URL as string | undefined) || "https://ai-fa-tawny.vercel.app"
+).replace(/\/+$/, "");
 
 export function publicSiteUrlForSlug(slug: string): string {
-  return `${SUPABASE_FUNCTIONS_URL}?slug=${encodeURIComponent(slug)}`;
+  return `${PUBLIC_SITE_BASE}/site/${encodeURIComponent(slug)}`;
+}
+
+export type QrTarget = "page" | "enquiry" | "rfq";
+
+/** The address a printed QR code opens. `source` is a short label (counter,
+ * flyer...) that is stored on each request so the owner can see which QR
+ * brought it in. */
+export function publicRequestUrl(slug: string, target: QrTarget, source: string): string {
+  const base = publicSiteUrlForSlug(slug);
+  const src = source.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  if (target === "page") return src ? `${base}?src=${src}` : base;
+  const params = new URLSearchParams({ type: target === "rfq" ? "rfq" : "contact" });
+  if (src) params.set("src", src);
+  return `${base}/request?${params.toString()}`;
 }
 
 /** Reads this business's current slug (always present — auto-generated on

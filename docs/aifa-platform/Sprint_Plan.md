@@ -66,16 +66,23 @@ Each sprint below is scoped to be independently demoable and to leave the system
 
 **DoD:** a real invoice sent from a test Workspace produces a working, no-login pay link; paying it updates status visibly on both the public page and back in the Owner's Workspace — verified live.
 
-## Sprint 68 — RFQ/PO Submission + Tracking
+## Sprint 68 — Customer Requests: QR Intake, Requests Inbox, RFQ → Quotation
 
-**Implements:** Architecture §2.3 (`requests`/`request_status_events`), §2.5.
+**Implements:** Architecture §2.3 (`requests`/`request_status_events`), §2.5 (revised 11 October 2026).
 
-- Migrate `requests`, `request_status_events` tables.
-- Build the public Submit Request page and Tracking page (per the existing mockup).
-- Wire an accepted Request into the existing Universal Input Router / `chained_intake` / `ApprovalTask` pipeline (Phase 5, Vol 5_5) — no new state machine.
-- Every status change in the Owner's Workspace that affects a public Request appends a `request_status_events` row the Tracking page reflects.
+**Re-scoped 11 October 2026 (owner decision):** requests get their own Sales → Requests inbox instead of the Approval Task pipeline, and the sprint is delivered in three phases. Reply channel is a tracking link plus an owner-tapped WhatsApp message (no email service yet). Phase D (customer views the quote online, Sprint 67 territory) and phase E (email/push, Bahasa Malaysia labels, follow-ups) come after the pilot.
 
-**DoD:** a real RFQ submitted through the public page appears as a real Approval Task in the Workspace; progressing it through to "Quoted" is visible on the public Tracking page within the same session — verified live.
+**68a — Intake and QR (built, 11 October 2026).**
+- Migration 21: reference code, tracking token, contact fields, source, consent, `slug_aliases`, `request_throttle`, `submit_public_request_v2()`, `get_request_tracking()`; database-enforced validation and rate limits. Regression test `supabase/tests/sprint68a_regression_test.sql` (T1-T9) passes on the live project.
+- Public Site: request form (`/site/<slug>/request`), success screen with reference and tracking link, private status page (`/track/<token>`), business-page buttons, renamed-slug redirect.
+- Owner Console: QR card in Business Settings (preview, PNG/SVG download, A5 print poster, source labels), vendored MIT QR encoder, corrected public link.
+- Still to do for 68a: deploy web-public, submit one real request, then revoke the old open request function.
+
+**68b — Requests inbox and replies (not started).** Owner RPCs (list, open, reply, set status, notes), Requests page and detail, unread badge, Overview card, WhatsApp reply shortcut, realtime, seed data.
+
+**68c — RFQ to quotation (not started).** Match or create the party, prefilled quotation draft, link back to the request, `quoted` status.
+
+**DoD:** a customer scans the owner's QR, submits a quote request, and the owner sees it in Sales → Requests, replies, and turns it into a quotation draft; the customer sees the reply on the tracking page within the same session — verified live.
 
 ## Sprint 69 — End-to-End Pilot & Hardening
 

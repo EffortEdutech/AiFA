@@ -319,7 +319,7 @@ export function BusinessSettingsPage({ db, businessId, deviceId, dek }: Props): 
 
       <WebsiteSettingsCard businessId={businessId} canConfigure={canConfigure} />
 
-      <PublicSiteLinkCard businessId={businessId} canConfigure={canConfigure} />
+      <PublicSiteLinkCard businessId={businessId} canConfigure={canConfigure} businessName={businessName} />
 
       <BYOKSettingsCard />
 
