@@ -28,9 +28,11 @@ interface Props {
   /** Render as a slide-over drawer (small screens). */
   drawer?: boolean;
   drawerOpen?: boolean;
+  /** Small count badges by item id (e.g. new customer requests). */
+  badges?: Record<string, number>;
 }
 
-export function Sidebar({ collapsed, activeItemId, onSelect, drawer = false, drawerOpen = false }: Props): JSX.Element {
+export function Sidebar({ collapsed, activeItemId, onSelect, drawer = false, drawerOpen = false, badges = {} }: Props): JSX.Element {
   const { isDomainVisible } = useAccess();
   const rail = collapsed && !drawer;
 
@@ -82,6 +84,11 @@ export function Sidebar({ collapsed, activeItemId, onSelect, drawer = false, dra
                 aria-current={activeItemId === item.id ? "page" : undefined}
               >
                 {item.label}
+                {(badges[item.id] ?? 0) > 0 && (
+                  <span className="aifa-sidebar-badge" aria-label={`${badges[item.id]} new`}>
+                    {badges[item.id]}
+                  </span>
+                )}
               </button>
             ))}
           </div>

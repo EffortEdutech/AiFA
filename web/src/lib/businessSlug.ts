@@ -29,6 +29,11 @@ export function publicSiteUrlForSlug(slug: string): string {
   return `${PUBLIC_SITE_BASE}/site/${encodeURIComponent(slug)}`;
 }
 
+/** The private status page for one request. */
+export function publicTrackingUrl(token: string): string {
+  return `${PUBLIC_SITE_BASE}/track/${encodeURIComponent(token)}`;
+}
+
 export type QrTarget = "page" | "enquiry" | "rfq";
 
 /** The address a printed QR code opens. `source` is a short label (counter,

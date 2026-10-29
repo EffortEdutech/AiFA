@@ -8,7 +8,7 @@
  * component in the `renderContent` switch below, replacing
  * PlaceholderPage — the shell itself does not change per module sprint.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SqlDb } from "@aifa/core/db/types";
 import type { AiProvider } from "@aifa/core/ai/types";
@@ -18,6 +18,7 @@ import { DevicesPanel } from "../components/DevicesPanel";
 import { Workspace } from "../components/Workspace";
 import type { ActiveDeviceInfo } from "../lib/syncService";
 import { Icon } from "../ui";
+import { countNewRequests } from "../lib/requests";
 
 import { AccessProvider } from "./AccessContext";
 import { Sidebar } from "./Sidebar";
@@ -33,6 +34,7 @@ import { ChartOfAccountsPage } from "./pages/ChartOfAccountsPage";
 import { LedgerPage } from "./pages/LedgerPage";
 import { PricingCatalogPage } from "./pages/PricingCatalogPage";
 import { QuotationsPage } from "./pages/QuotationsPage";
+import { RequestsPage } from "./pages/RequestsPage";
 import { InvoicesPage } from "./pages/InvoicesPage";
 import { PaymentsCreditNotesPage } from "./pages/PaymentsCreditNotesPage";
 import { ArAgeingPage } from "./pages/ArAgeingPage";
@@ -84,6 +86,7 @@ export function AppShell({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeItemId, setActiveItemId] = useState(DEFAULT_SIDEBAR_ITEM_ID);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [newRequests, setNewRequests] = useState(0);
   const mainRef = useRef<HTMLElement>(null);
   // Below 768px the sidebar becomes a slide-over drawer instead of a
   // fixed column (UI polish Phase 2).
@@ -108,6 +111,26 @@ export function AppShell({
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [drawerOpen]);
+
+  // Count of unseen customer requests for the Requests sidebar badge. A member
+  // who cannot read requests simply sees 0. Refreshed every minute, when the
+  // tab becomes visible again, and after any change made on the Requests page.
+  const refreshNewRequests = useCallback((): void => {
+    countNewRequests(businessId).then(setNewRequests).catch(() => setNewRequests(0));
+  }, [businessId]);
+
+  useEffect(() => {
+    refreshNewRequests();
+    const onVisible = (): void => {
+      if (document.visibilityState === "visible") refreshNewRequests();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    const timer = window.setInterval(onVisible, 60_000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(timer);
+    };
+  }, [refreshNewRequests]);
 
   // A new page starts at the top of the content area.
   useEffect(() => {
@@ -147,6 +170,14 @@ export function AppShell({
         return <MembersPage businessId={businessId} />;
       case "approvals":
         return <ApprovalsPage businessId={businessId} />;
+      case "requests":
+        return (
+          <RequestsPage
+            businessId={businessId}
+            onChanged={refreshNewRequests}
+            onGoToQuotations={() => setActiveItemId("quotations")}
+          />
+        );
       case "parties":
         return <PartiesPage businessId={businessId} />;
       case "chart-of-accounts":
@@ -219,6 +250,7 @@ export function AppShell({
             onSelect={handleSelect}
             drawer={isMobile}
             drawerOpen={drawerOpen}
+            badges={{ requests: newRequests }}
           />
           {isMobile && drawerOpen && (
             <div className="aifa-backdrop" aria-hidden="true" onClick={() => setDrawerOpen(false)} />

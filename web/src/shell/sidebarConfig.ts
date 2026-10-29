@@ -73,6 +73,7 @@ export const SIDEBAR: SidebarSection[] = [
     icon: "receipt",
     label: "Sales",
     items: [
+      { id: "requests", label: "Requests", domain: "sales", sprint: 68, status: "existing" },
       { id: "parties", label: "Parties (Customers/Suppliers)", domain: "sales", sprint: 39, status: "existing" },
       { id: "pricing-catalog", label: "Pricing & Catalog", domain: "pricing", sprint: 39, status: "existing" },
       { id: "quotations", label: "Quotations", domain: "sales", sprint: 40, status: "existing" },

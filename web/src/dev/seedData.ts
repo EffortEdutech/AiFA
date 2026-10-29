@@ -194,6 +194,28 @@ const sstRates: Row[] = [
 const businesses: Row[] = [
   { id: SEED_BUSINESS_ID, owner_user_id: SEED_USER_ID, legal_name: "Kedai Contoh Sdn Bhd", industry: "retail", pka_version: "1", created_at: iso(-200), access_model_override: null, commission_trigger_status: "paid", ssm_registration_number: "202001000001 (sample)", slug: "kedai-contoh" },
 ];
+const requestRow = (n: number, type: string, status: string, name: string, phone: string, source: string | null, payload: Row, offset: number, extra: Row = {}): Row => ({
+  id: id(70, n), business_id: SEED_BUSINESS_ID, request_type: type, payload, status,
+  reference_code: `RQ-DEMO${n}${n}${n}`.slice(0, 9), tracking_token: String(n).repeat(64).slice(0, 64),
+  customer_name: name, customer_phone: phone, customer_email: null, source, consent_at: iso(offset),
+  seen_at: status === "new" ? null : iso(offset + 0.1), closed_at: status === "closed" ? iso(offset + 1) : null,
+  quotation_id: null, created_at: iso(offset), updated_at: iso(offset), ...extra,
+});
+const requests: Row[] = [
+  requestRow(1, "rfq", "new", "Aminah Yusof", "60123456701", "counter", { message: "Need catering for an office event next month.", items: [{ description: "Nasi lemak box", quantity: "50" }, { description: "Teh tarik (jug)", quantity: "5" }], needed_by: day(20), delivery_area: "Shah Alam" }, -0.2),
+  requestRow(2, "contact", "new", "Daniel Lim", "60123456702", "flyer", { message: "Do you deliver to Subang Jaya on weekends?" }, -0.5),
+  requestRow(3, "rfq", "replied", "Siti Nurhaliza", "60123456703", "van", { message: "Looking for hampers for staff.", items: [{ description: "Festive hamper", quantity: "20" }] }, -3),
+  requestRow(4, "contact", "closed", "Raj Kumar", "60123456704", null, { message: "What are your opening hours on public holidays?" }, -9),
+];
+const requestEvents: Row[] = [
+  { id: id(71, 1), request_id: id(70, 1), business_id: SEED_BUSINESS_ID, kind: "received", status: "new", body: null, is_public: true, created_at: iso(-0.2) },
+  { id: id(71, 2), request_id: id(70, 2), business_id: SEED_BUSINESS_ID, kind: "received", status: "new", body: null, is_public: true, created_at: iso(-0.5) },
+  { id: id(71, 3), request_id: id(70, 3), business_id: SEED_BUSINESS_ID, kind: "received", status: "new", body: null, is_public: true, created_at: iso(-3) },
+  { id: id(71, 4), request_id: id(70, 3), business_id: SEED_BUSINESS_ID, kind: "reply", status: "replied", body: "Thanks! We can do 20 hampers. Sending a quote shortly.", is_public: true, created_at: iso(-2.9) },
+  { id: id(71, 5), request_id: id(70, 3), business_id: SEED_BUSINESS_ID, kind: "note", status: null, body: "Check ribbon stock before confirming.", is_public: false, created_at: iso(-2.8) },
+  { id: id(71, 6), request_id: id(70, 4), business_id: SEED_BUSINESS_ID, kind: "received", status: "new", body: null, is_public: true, created_at: iso(-9) },
+  { id: id(71, 7), request_id: id(70, 4), business_id: SEED_BUSINESS_ID, kind: "status", status: "closed", body: null, is_public: true, created_at: iso(-8) },
+];
 const publicSiteContent: Row[] = [
   { business_id: SEED_BUSINESS_ID, hero_headline: "Fresh food, fair prices", hero_subtext: "Sample copy for the seeded business.", services: [{ name: "Catering", description: "Event and office catering." }, { name: "Wholesale", description: "Bulk supply for cafes." }], contact_email: "hello@kedai-contoh.example", contact_phone: "+60 12-345 6789", accent_color: "#2f6f5e", published_at: iso(-10), updated_at: iso(-10) },
 ];
@@ -207,7 +229,7 @@ export const SEED_TABLES: Record<string, Row[]> = {
   contracts, e_signature_envelopes: eSignatureEnvelopes, payroll_runs: payrollRuns, payslips,
   employee_profiles: employeeProfiles, leave_types: leaveTypes, leave_applications: leaveApplications,
   approval_tasks: approvalTasks, capture_triage: captureTriage, e_invoice_submissions: eInvoiceSubmissions,
-  sst_rates: sstRates, public_site_content: publicSiteContent,
+  sst_rates: sstRates, public_site_content: publicSiteContent, requests, request_status_events: requestEvents,
 };
 
 const ageing = (inv: Row, daysOverdue: number): Row => ({
